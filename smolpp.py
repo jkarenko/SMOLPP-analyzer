@@ -4,7 +4,6 @@ import logging
 import os
 import sys
 
-import librosa
 import numpy as np
 import scipy
 import torch
@@ -37,18 +36,36 @@ class SimilarityModel(nn.Module):
 def extract_features(audio_file):
     logger.info(f"Extracting features from {audio_file}")
     try:
-        y, sr = librosa.load(audio_file)
-        tempo, _ = librosa.beat.beat_track(y=y, sr=sr)
-        chroma = librosa.feature.chroma_stft(y=y, sr=sr)
-        mfcc = librosa.feature.mfcc(y=y, sr=sr)
-        spectral_centroid = librosa.feature.spectral_centroid(y=y, sr=sr)
+        import librosa
+        y, sr = librosa.load(audio_file, duration=10)  # Load only first 10 seconds
 
-        features = {
-            'tempo': float(tempo[0]) if isinstance(tempo, np.ndarray) else float(tempo),
-            'chroma_mean': np.mean(chroma),
-            'mfcc_mean': np.mean(mfcc),
-            'spectral_centroid_mean': np.mean(spectral_centroid)
-        }
+        features = {'tempo': librosa.beat.tempo(y=y, sr=sr)[0],
+                    'zero_crossing_rate': np.mean(librosa.feature.zero_crossing_rate(y)),
+                    'spectral_centroid': np.mean(librosa.feature.spectral_centroid(y=y, sr=sr)),
+                    'spectral_rolloff': np.mean(librosa.feature.spectral_rolloff(y=y, sr=sr))}
+
+        # Basic features
+
+        # Mel-frequency cepstral coefficients
+        mfcc = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=13)
+        for i, coef in enumerate(mfcc):
+            features[f'mfcc_{i}'] = np.mean(coef)
+
+        # Chroma features
+        chroma = librosa.feature.chroma_stft(y=y, sr=sr)
+        features['chroma_mean'] = np.mean(chroma)
+        features['chroma_std'] = np.std(chroma)
+
+        # Spectral contrast
+        contrast = librosa.feature.spectral_contrast(y=y, sr=sr)
+        features['spectral_contrast_mean'] = np.mean(contrast)
+        features['spectral_contrast_std'] = np.std(contrast)
+
+        # Tonnetz (tonal centroid features)
+        tonnetz = librosa.feature.tonnetz(y=librosa.effects.harmonic(y), sr=sr)
+        features['tonnetz_mean'] = np.mean(tonnetz)
+        features['tonnetz_std'] = np.std(tonnetz)
+
         logger.debug(f"Extracted features: {features}")
         return features
     except Exception as e:
@@ -99,9 +116,13 @@ def train_model(positive_dirs, negative_dirs):
     logger.info(f"Initializing model with input size {x_train.shape[1]}")
     model = SimilarityModel(x_train.shape[1])
     criterion = nn.BCELoss()
-    optimizer = optim.Adam(model.parameters(), lr=0.01)
+    optimizer = optim.Adam(model.parameters(), lr=0.001, weight_decay=0.01)  # Added L2 regularization
 
     n_epochs = 1000
+    patience = 50  # for early stopping
+    best_val_loss = float('inf')
+    epochs_without_improvement = 0
+
     logger.info(f"Starting model training for {n_epochs} epochs")
     for epoch in range(n_epochs):
         model.train()
@@ -116,13 +137,19 @@ def train_model(positive_dirs, negative_dirs):
             val_outputs = model(x_val)
             val_loss = criterion(val_outputs, y_val)
 
+        if val_loss < best_val_loss:
+            best_val_loss = val_loss
+            epochs_without_improvement = 0
+        else:
+            epochs_without_improvement += 1
+
+        if epochs_without_improvement >= patience:
+            logger.info(f"Early stopping triggered at epoch {epoch + 1}")
+            break
+
         if (epoch + 1) % 100 == 0:
             logger.info(
                 f'Epoch [{epoch + 1}/{n_epochs}], Train Loss: {train_loss.item():.4f}, Val Loss: {val_loss.item():.4f}')
-
-        if train_loss.item() < 0.01:
-            logger.info(f"Stopping early at epoch {epoch + 1} due to low loss")
-            break
 
     logger.info("Model training completed")
     return model
