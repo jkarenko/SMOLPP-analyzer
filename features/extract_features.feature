@@ -5,15 +5,19 @@ Feature: SMOLPP Functionality
 
   Background:
     Given I have a valid audio file "test_audio.mp3"
-    And I have a directory "test_training_set" with audio files
+    And I have directories with positive and negative audio files
 
   Scenario: Extracting features from a valid audio file
     When I extract features from the audio file
     Then I should get a dictionary of features
     And the dictionary should contain "tempo"
+    And the dictionary should contain "zero_crossing_rate"
+    And the dictionary should contain "spectral_centroid"
+    And the dictionary should contain "spectral_rolloff"
+    And the dictionary should contain "mfcc_0"
     And the dictionary should contain "chroma_mean"
-    And the dictionary should contain "mfcc_mean"
-    And the dictionary should contain "spectral_centroid_mean"
+    And the dictionary should contain "spectral_contrast_mean"
+    And the dictionary should contain "tonnetz_mean"
 
   Scenario: Training a model
     When I train a model using the training set
@@ -29,7 +33,12 @@ Feature: SMOLPP Functionality
     When I analyze the similarity of "test_audio.mp3"
     Then I should get a similarity score between 0 and 1
 
-  Scenario: End-to-end test
-    When I run SMOLPP with "test_audio.mp3" and "test_training_set"
+  Scenario: End-to-end test - Training
+    When I run SMOLPP with "test_audio.mp3" in train mode
+    Then the process should complete without errors
+
+  Scenario: End-to-end test - Analyzing
+    Given I have a trained model
+    When I run SMOLPP with "test_audio.mp3" in analyze mode
     Then it should output a similarity score
     And the process should complete without errors

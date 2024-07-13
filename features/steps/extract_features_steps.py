@@ -1,4 +1,3 @@
-import io
 import os
 import tempfile
 
@@ -7,31 +6,33 @@ import soundfile as sf
 import torch
 from behave import given, when, then
 
-from smolpp import extract_features, train_model, analyze_similarity, SimilarityModel
+from smolpp import extract_features, train_model, analyze_similarity, SimilarityModel, save_model, load_model
 
 
 @given('I have a valid audio file "{filename}"')
 def step_impl(context, filename):
     context.audio_file = os.path.join('test_data', filename)
     if not os.path.exists(context.audio_file):
-        # Create a dummy audio file
         sample_rate = 44100
-        duration = 3  # seconds
+        duration = 3
         t = np.linspace(0, duration, int(sample_rate * duration), False)
-        audio_data = np.sin(440 * 2 * np.pi * t)  # 440 Hz sine wave
+        audio_data = np.sin(440 * 2 * np.pi * t)
         sf.write(context.audio_file, audio_data, sample_rate, format='wav')
+    context.model_path = os.path.join(tempfile.gettempdir(), 'test_model.pth')
 
 
-@given('I have a directory "{dirname}" with audio files')
-def step_impl(context, dirname):
-    context.training_set = tempfile.mkdtemp()
-    for i in range(3):  # Create 3 dummy audio files
-        filename = os.path.join(context.training_set, f'audio_{i}.wav')
-        sample_rate = 44100
-        duration = 2  # seconds
-        t = np.linspace(0, duration, int(sample_rate * duration), False)
-        audio_data = np.sin((440 + i * 100) * 2 * np.pi * t)  # Different frequencies
-        sf.write(filename, audio_data, sample_rate, format='wav')
+@given('I have directories with positive and negative audio files')
+def step_impl(context):
+    context.positive_dir = tempfile.mkdtemp()
+    context.negative_dir = tempfile.mkdtemp()
+    for i, directory in enumerate([context.positive_dir, context.negative_dir]):
+        for j in range(3):
+            filename = os.path.join(directory, f'audio_{j}.wav')
+            sample_rate = 44100
+            duration = 2
+            t = np.linspace(0, duration, int(sample_rate * duration), False)
+            audio_data = np.sin((440 + i * 100 + j * 50) * 2 * np.pi * t)
+            sf.write(filename, audio_data, sample_rate, format='wav')
 
 
 @when('I extract features from the audio file')
@@ -51,8 +52,8 @@ def step_impl(context, feature):
 
 @when('I train a model using the training set')
 def step_impl(context):
-    training_files = [os.path.join(context.training_set, f) for f in os.listdir(context.training_set)]
-    context.model = train_model(training_files)
+    context.model = train_model([context.positive_dir], [context.negative_dir])
+    save_model(context.model, context.model.fc1.in_features, context.model_path)
 
 
 @then('I should get a trained model object')
@@ -68,18 +69,7 @@ def step_impl(context):
 
 @when('I save and load the model')
 def step_impl(context):
-    # Save model to a BytesIO object
-    buffer = io.BytesIO()
-    torch.save({
-        'state_dict': context.model.state_dict(),
-        'input_size': context.model.fc1.in_features
-    }, buffer)
-
-    # Load model from the BytesIO object
-    buffer.seek(0)
-    model_info = torch.load(buffer)
-    context.loaded_model = SimilarityModel(model_info['input_size'])
-    context.loaded_model.load_state_dict(model_info['state_dict'])
+    context.loaded_model = load_model(context.model_path)
 
 
 @then('the loaded model should have the same structure as the original model')
@@ -99,10 +89,18 @@ def step_impl(context):
     assert 0 <= context.similarity_score <= 1
 
 
-@when('I run SMOLPP with "{input_file}" and "{training_set}"')
-def step_impl(context, input_file, training_set):
+@when('I run SMOLPP with "{input_file}" in train mode')
+def step_impl(context, input_file):
     input_path = os.path.join('test_data', input_file)
-    context.output = os.popen(f'python smolpp.py {input_path} {context.training_set}').read()
+    context.output = os.popen(
+        f'python smolpp.py train --positive_dirs {context.positive_dir} --negative_dirs {context.negative_dir} --save_model {context.model_path}').read()
+
+
+@when('I run SMOLPP with "{input_file}" in analyze mode')
+def step_impl(context, input_file):
+    input_path = os.path.join('test_data', input_file)
+    context.output = os.popen(
+        f'python smolpp.py analyze --input_file {input_path} --load_model {context.model_path}').read()
 
 
 @then('it should output a similarity score')
