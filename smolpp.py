@@ -57,12 +57,12 @@ def extract_features(audio_file):
         logger.error(f"Error extracting features from {audio_file}: {str(e)}")
         raise ValueError(f"Error extracting features from {audio_file}: {str(e)}")
 
-    features = np.array([
-        tempo,
-        chroma_mean,
-        mfcc_mean,
-        spectral_centroid_mean
-    ], dtype=np.float32)
+    features = {
+        'tempo': tempo,
+        'chroma_mean': chroma_mean,
+        'mfcc_mean': mfcc_mean,
+        'spectral_centroid_mean': spectral_centroid_mean
+    }
 
     logger.debug(f"Extracted features: {features}")
     return features
@@ -77,13 +77,13 @@ def train_model(training_data):
     features = []
     for file in training_data:
         try:
-            features.append(extract_features(file))
+            file_features = extract_features(file)
+            features.append(list(file_features.values()))
         except ValueError as e:
             logger.warning(f"Skipping file {file}. {str(e)}")
 
     if not features:
         logger.warning("No valid features extracted from training data")
-        # Instead of raising an exception, return a dummy model
         return SimilarityModel(4)  # 4 is the number of features we extract
 
     x = torch.tensor(np.array(features), dtype=torch.float32)
@@ -117,7 +117,7 @@ def analyze_similarity(model, input_file):
     logger.info(f"Analyzing similarity for {input_file}")
     try:
         features = extract_features(input_file)
-        x = torch.tensor(features, dtype=torch.float32).unsqueeze(0)
+        x = torch.tensor(list(features.values()), dtype=torch.float32).unsqueeze(0)
         with torch.no_grad():
             similarity = model(x).item()
         logger.info(f"Similarity score: {similarity:.4f}")
