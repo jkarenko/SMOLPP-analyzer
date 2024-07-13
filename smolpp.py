@@ -213,7 +213,7 @@ def train_model(positive_dirs, negative_dirs, n_splits=5):
         final_optimizer.step()
 
     logger.info("Final model training completed")
-    return final_model
+    return final_model, min_vals, max_vals
 
 
 def analyze_similarity(model, min_vals, max_vals, input_file, offset=0, duration=None):
@@ -305,8 +305,7 @@ def main():
                 save_model(model, model.fc1.in_features, min_vals, max_vals, args.save_model)
             print("Model training completed.")
         elif args.mode == 'analyze':
-
-            model = load_model(args.load_model)
+            model, min_vals, max_vals = load_model(args.load_model)
             if '*' in args.input_file:
                 input_files = glob.glob(os.path.expanduser(args.input_file))
             else:
@@ -320,9 +319,7 @@ def main():
                 if not os.path.exists(file):
                     logger.error(f"File not found: {file}")
                     continue
-                model, min_vals, max_vals = load_model(args.load_model)
-                similarity = analyze_similarity(model, min_vals, max_vals, file, offset=args.offset,
-                                                duration=args.duration)
+                similarity = analyze_similarity(model, min_vals, max_vals, file, offset=args.offset, duration=args.duration)
                 print(f"File: {file}")
                 print(f"Similarity score: {similarity:.4f}")
                 print("---")
