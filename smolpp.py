@@ -98,7 +98,7 @@ def extract_and_cache_features(directory):
     for file in glob.glob(os.path.join(directory, '*.mp3')):
         try:
             file_features = extract_features(file)
-            features[file] = list(file_features.values())
+            features[file] = [float(val) for val in file_features.values()]
         except ValueError as e:
             logger.warning(f"Skipping file {file}. {str(e)}")
 
