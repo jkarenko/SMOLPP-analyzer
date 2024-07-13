@@ -7,12 +7,12 @@ readme = "README.md"
 
 [tool.poetry.dependencies]
 python = "^3.11"
-librosa = "^0.10.2.post1"
-torch = "^2.3.1"
-pandas = "^2.2.2"
-numpy = "^2.0.0"
-seaborn = "^0.13.2"
-behave = "^1.2.6"
+librosa = "*"
+torch = "*"
+pandas = "*"
+numpy = "^1.26.4"
+seaborn = "*"
+behave = "*"
 
 
 [build-system]
