@@ -10,6 +10,7 @@ import scipy
 import torch
 import torch.nn as nn
 import torch.optim as optim
+from sklearn.model_selection import KFold
 
 logging.basicConfig(level=logging.WARNING, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -77,11 +78,10 @@ def normalize_features(features):
     return (features - min_vals) / (max_vals - min_vals)
 
 
-def train_model(positive_dirs, negative_dirs):
-    logger.info(f"Starting feature extraction for positive and negative examples")
+def train_model(positive_dirs, negative_dirs, n_splits=5):
+    # Extract features and prepare data as before
     features = []
     labels = []
-
     for label, directories in [(1, positive_dirs), (0, negative_dirs)]:
         for directory in directories:
             files = glob.glob(os.path.join(directory, '*.mp3'))
@@ -93,64 +93,65 @@ def train_model(positive_dirs, negative_dirs):
                 except ValueError as e:
                     logger.warning(f"Skipping file {file}. {str(e)}")
 
-    if not features:
-        logger.warning("No valid features extracted from training data")
-        return SimilarityModel(4)
-
     features = np.array(features)
     labels = np.array(labels)
     normalized_features = normalize_features(features)
 
-    indices = np.arange(normalized_features.shape[0])
-    np.random.shuffle(indices)
-    split = int(0.8 * len(indices))
-    train_indices, val_indices = indices[:split], indices[split:]
+    kf = KFold(n_splits=n_splits, shuffle=True, random_state=42)
 
-    x_train = torch.tensor(normalized_features[train_indices], dtype=torch.float32)
-    y_train = torch.tensor(labels[train_indices], dtype=torch.float32).unsqueeze(1)
-    x_val = torch.tensor(normalized_features[val_indices], dtype=torch.float32)
-    y_val = torch.tensor(labels[val_indices], dtype=torch.float32).unsqueeze(1)
+    fold_results = []
+    for fold, (train_index, val_index) in enumerate(kf.split(normalized_features)):
+        logger.info(f"Training fold {fold + 1}/{n_splits}")
 
-    logger.info(f"Initializing model with input size {x_train.shape[1]}")
-    model = SimilarityModel(x_train.shape[1])
-    criterion = nn.BCELoss()
-    optimizer = optim.Adam(model.parameters(), lr=0.001, weight_decay=0.01)  # Added L2 regularization
+        x_train = torch.tensor(normalized_features[train_index], dtype=torch.float32)
+        y_train = torch.tensor(labels[train_index], dtype=torch.float32).unsqueeze(1)
+        x_val = torch.tensor(normalized_features[val_index], dtype=torch.float32)
+        y_val = torch.tensor(labels[val_index], dtype=torch.float32).unsqueeze(1)
 
-    n_epochs = 1000
-    patience = 50  # for early stopping
-    best_val_loss = float('inf')
-    epochs_without_improvement = 0
+        model = SimilarityModel(x_train.shape[1])
+        criterion = nn.BCELoss()
+        optimizer = optim.Adam(model.parameters(), lr=0.001, weight_decay=0.01)
 
-    logger.info(f"Starting model training for {n_epochs} epochs")
+        # Training loop (similar to original, but for fewer epochs)
+        n_epochs = 200  # Reduced for CV
+        for epoch in range(n_epochs):
+            model.train()
+            optimizer.zero_grad()
+            train_outputs = model(x_train)
+            train_loss = criterion(train_outputs, y_train)
+            train_loss.backward()
+            optimizer.step()
+
+            model.eval()
+            with torch.no_grad():
+                val_outputs = model(x_val)
+                val_loss = criterion(val_outputs, y_val)
+
+            if (epoch + 1) % 50 == 0:
+                logger.info(f'Fold {fold + 1}, Epoch [{epoch + 1}/{n_epochs}], '
+                            f'Train Loss: {train_loss.item():.4f}, Val Loss: {val_loss.item():.4f}')
+
+        fold_results.append(val_loss.item())
+
+    logger.info(f"Cross-validation complete. Mean validation loss: {np.mean(fold_results):.4f}")
+
+    # Train final model on all data
+    x_all = torch.tensor(normalized_features, dtype=torch.float32)
+    y_all = torch.tensor(labels, dtype=torch.float32).unsqueeze(1)
+    final_model = SimilarityModel(x_all.shape[1])
+    final_optimizer = optim.Adam(final_model.parameters(), lr=0.001, weight_decay=0.01)
+
+    # Final training loop
     for epoch in range(n_epochs):
-        model.train()
-        optimizer.zero_grad()
-        train_outputs = model(x_train)
-        train_loss = criterion(train_outputs, y_train)
-        train_loss.backward()
-        optimizer.step()
+        final_model.train()
+        final_optimizer.zero_grad()
+        outputs = final_model(x_all)
+        loss = criterion(outputs, y_all)
+        loss.backward()
+        final_optimizer.step()
 
-        model.eval()
-        with torch.no_grad():
-            val_outputs = model(x_val)
-            val_loss = criterion(val_outputs, y_val)
-
-        if val_loss < best_val_loss:
-            best_val_loss = val_loss
-            epochs_without_improvement = 0
-        else:
-            epochs_without_improvement += 1
-
-        if epochs_without_improvement >= patience:
-            logger.info(f"Early stopping triggered at epoch {epoch + 1}")
-            break
-
-        if (epoch + 1) % 100 == 0:
-            logger.info(
-                f'Epoch [{epoch + 1}/{n_epochs}], Train Loss: {train_loss.item():.4f}, Val Loss: {val_loss.item():.4f}')
-
-    logger.info("Model training completed")
-    return model
+    logger.info("Final model training completed")
+    return final_model
 
 
 def analyze_similarity(model, input_file, offset=0, duration=None):
