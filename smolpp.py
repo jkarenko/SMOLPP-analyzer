@@ -1,4 +1,5 @@
 import argparse
+import logging
 import os
 import sys
 
@@ -7,6 +8,10 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
+
+# Set up logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
 
 class SimilarityModel(nn.Module):
@@ -25,9 +30,11 @@ class SimilarityModel(nn.Module):
 
 
 def extract_features(audio_file):
+    logger.info(f"Extracting features from {audio_file}")
     try:
         y, sr = librosa.load(audio_file)
     except Exception as e:
+        logger.error(f"Error loading audio file {audio_file}: {str(e)}")
         raise ValueError(f"Error loading audio file {audio_file}: {str(e)}")
 
     try:
@@ -36,6 +43,7 @@ def extract_features(audio_file):
         mfcc = librosa.feature.mfcc(y=y, sr=sr)
         spectral_centroid = librosa.feature.spectral_centroid(y=y, sr=sr)
     except Exception as e:
+        logger.error(f"Error extracting features from {audio_file}: {str(e)}")
         raise ValueError(f"Error extracting features from {audio_file}: {str(e)}")
 
     features = {
@@ -45,30 +53,36 @@ def extract_features(audio_file):
         'spectral_centroid_mean': np.mean(spectral_centroid)
     }
 
+    logger.debug(f"Extracted features: {features}")
     return features
 
 
 def train_model(training_data):
     if not training_data:
+        logger.error("No training data provided")
         raise ValueError("No training data provided")
 
+    logger.info(f"Starting feature extraction for {len(training_data)} files")
     features = []
     for file in training_data:
         try:
             features.append(extract_features(file))
         except ValueError as e:
-            print(f"Warning: Skipping file {file}. {str(e)}")
+            logger.warning(f"Skipping file {file}. {str(e)}")
 
     if not features:
+        logger.error("No valid features extracted from training data")
         raise ValueError("No valid features extracted from training data")
 
     X = torch.tensor([list(f.values()) for f in features], dtype=torch.float32)
 
+    logger.info(f"Initializing model with input size {X.shape[1]}")
     model = SimilarityModel(X.shape[1])
     criterion = nn.MSELoss()
     optimizer = optim.Adam(model.parameters())
 
     n_epochs = 100
+    logger.info(f"Starting model training for {n_epochs} epochs")
     try:
         for epoch in range(n_epochs):
             optimizer.zero_grad()
@@ -78,22 +92,27 @@ def train_model(training_data):
             optimizer.step()
 
             if (epoch + 1) % 10 == 0:
-                print(f'Epoch [{epoch + 1}/{n_epochs}], Loss: {loss.item():.4f}')
+                logger.info(f'Epoch [{epoch + 1}/{n_epochs}], Loss: {loss.item():.4f}')
     except RuntimeError as e:
+        logger.error(f"Error during model training: {str(e)}")
         raise ValueError(f"Error during model training: {str(e)}")
 
+    logger.info("Model training completed")
     return model
 
 
 def analyze_similarity(model, input_file):
+    logger.info(f"Analyzing similarity for {input_file}")
     try:
         features = extract_features(input_file)
     except ValueError as e:
+        logger.error(f"Error analyzing input file: {str(e)}")
         raise ValueError(f"Error analyzing input file: {str(e)}")
 
     X = torch.tensor(list(features.values()), dtype=torch.float32).unsqueeze(0)
     with torch.no_grad():
         similarity = model(X).item()
+    logger.info(f"Similarity score: {similarity:.4f}")
     return similarity
 
 
@@ -101,33 +120,42 @@ def main():
     parser = argparse.ArgumentParser(description="SMOLPP: Audio Similarity Analyzer")
     parser.add_argument("input_file", help="Path to input audio file")
     parser.add_argument("training_set", help="Path to directory containing training audio files")
+    parser.add_argument("--debug", action="store_true", help="Enable debug logging")
     args = parser.parse_args()
 
+    if args.debug:
+        logger.setLevel(logging.DEBUG)
+
+    logger.debug("Starting SMOLPP")
+
     if not os.path.exists(args.input_file):
-        print(f"Error: Input file '{args.input_file}' does not exist.")
+        logger.error(f"Input file '{args.input_file}' does not exist.")
         sys.exit(1)
 
     if not os.path.isdir(args.training_set):
-        print(f"Error: Training set directory '{args.training_set}' does not exist.")
+        logger.error(f"Training set directory '{args.training_set}' does not exist.")
         sys.exit(1)
 
     training_files = [os.path.join(args.training_set, f) for f in os.listdir(args.training_set) if
                       f.endswith(('.mp3', '.wav'))]
 
     if not training_files:
-        print(f"Error: No .mp3 or .wav files found in the training set directory.")
+        logger.error(f"No .mp3 or .wav files found in the training set directory.")
         sys.exit(1)
 
     try:
+        logger.info(f"Training model with {len(training_files)} files")
         model = train_model(training_files)
         similarity = analyze_similarity(model, args.input_file)
         print(f"Similarity score: {similarity:.4f}")
     except ValueError as e:
-        print(f"Error: {str(e)}")
+        logger.error(str(e))
         sys.exit(1)
     except Exception as e:
-        print(f"An unexpected error occurred: {str(e)}")
+        logger.exception(f"An unexpected error occurred: {str(e)}")
         sys.exit(1)
+
+    logger.debug("SMOLPP completed successfully")
 
 
 if __name__ == "__main__":
