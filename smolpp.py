@@ -64,7 +64,7 @@ def youtube_audio(url):
 
 
 def extract_features(audio_file, offset=0, duration=None):
-    logger.info(f"Extracting features from {audio_file}")
+    logger.debug(f"Extracting features from {audio_file}")
     try:
         y, sr = librosa.load(audio_file, offset=offset, duration=duration)
 
@@ -243,11 +243,11 @@ def train_model(positive_dirs, negative_dirs, n_splits=5):
 
 
 def analyze_similarity(model, min_vals, max_vals, input_file, offset=0, duration=None, is_youtube_url=False):
-    logger.info(f"Analyzing similarity for {'YouTube video' if is_youtube_url else 'file'}: {input_file}")
+    logger.debug(f"Analyzing similarity for {'YouTube video' if is_youtube_url else 'file'}: {input_file}")
     try:
         if is_youtube_url:
             with youtube_audio(input_file) as audio_file:
-                logger.info(f"Downloaded YouTube audio to: {audio_file}")
+                logger.debug(f"Downloaded YouTube audio to: {audio_file}")
                 return analyze_audio_file(model, min_vals, max_vals, audio_file, offset, duration)
         else:
             return analyze_audio_file(model, min_vals, max_vals, input_file, offset, duration)
@@ -263,7 +263,7 @@ def analyze_audio_file(model, min_vals, max_vals, audio_file, offset=0, duration
     x = torch.tensor(normalized_features, dtype=torch.float32).unsqueeze(0)
     with torch.no_grad():
         similarity = model(x).item()
-    logger.info(f"Similarity score: {similarity:.4f}")
+    logger.debug(f"Similarity score: {similarity:.4f}")
     return similarity
 
 
@@ -279,7 +279,7 @@ def save_model(model, input_size, min_vals, max_vals, file_path):
 
 
 def load_model(file_path):
-    logger.info(f"Loading model from {file_path}")
+    logger.debug(f"Loading model from {file_path}")
     model_info = torch.load(file_path)
     model = SimilarityModel(model_info['input_size'])
     model.load_state_dict(model_info['state_dict'])
@@ -339,7 +339,7 @@ def main():
             model, min_vals, max_vals = train_model(args.positive_dirs, args.negative_dirs)
             if args.save_model:
                 save_model(model, model.fc1.in_features, min_vals, max_vals, args.save_model)
-            print("Model training completed.")
+            logger.info("Model training completed.")
         elif args.mode == 'analyze':
             model, min_vals, max_vals = load_model(args.load_model)
             if args.yt_dlp:
@@ -362,9 +362,8 @@ def main():
                     continue
                 similarity = analyze_similarity(model, min_vals, max_vals, file, offset=args.offset,
                                                 duration=args.duration, is_youtube_url=args.yt_dlp)
-                print(f"{'YouTube video' if args.yt_dlp else 'File'}: {file}")
-                print(f"Similarity score: {similarity * 100:.2f}%")
-                print("---")
+                # logger.info(f"{'YouTube video' if args.yt_dlp else 'File'}: {file}")
+                logger.info(f"{file} similarity: {similarity * 100:.2f}%")
     except Exception as e:
         logger.exception(f"An error occurred: {str(e)}")
         sys.exit(1)
