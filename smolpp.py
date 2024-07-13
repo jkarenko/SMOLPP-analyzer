@@ -1,5 +1,6 @@
 import argparse
 import glob
+import json
 import logging
 import os
 import sys
@@ -87,20 +88,34 @@ def normalize_features(features):
     return (features - min_vals) / (max_vals - min_vals)
 
 
+def extract_and_cache_features(directory):
+    cache_file = os.path.join(directory, 'features.json')
+    if os.path.exists(cache_file):
+        with open(cache_file, 'r') as f:
+            return json.load(f)
+
+    features = {}
+    for file in glob.glob(os.path.join(directory, '*.mp3')):
+        try:
+            file_features = extract_features(file)
+            features[file] = list(file_features.values())
+        except ValueError as e:
+            logger.warning(f"Skipping file {file}. {str(e)}")
+
+    with open(cache_file, 'w') as f:
+        json.dump(features, f)
+
+    return features
+
+
 def train_model(positive_dirs, negative_dirs, n_splits=5):
-    # Extract features and prepare data as before
     features = []
     labels = []
     for label, directories in [(1, positive_dirs), (0, negative_dirs)]:
         for directory in directories:
-            files = glob.glob(os.path.join(directory, '*.mp3'))
-            for file in files:
-                try:
-                    file_features = extract_features(file)
-                    features.append(list(file_features.values()))
-                    labels.append(label)
-                except ValueError as e:
-                    logger.warning(f"Skipping file {file}. {str(e)}")
+            dir_features = extract_and_cache_features(directory)
+            features.extend(dir_features.values())
+            labels.extend([label] * len(dir_features))
 
     features = np.array(features)
     labels = np.array(labels)
