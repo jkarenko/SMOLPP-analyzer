@@ -116,6 +116,23 @@ def analyze_similarity(model, input_file):
     return similarity
 
 
+def save_model(model, input_size, file_path):
+    logger.info(f"Saving model to {file_path}")
+    model_info = {
+        'state_dict': model.state_dict(),
+        'input_size': input_size
+    }
+    torch.save(model_info, file_path)
+
+
+def load_model(file_path):
+    logger.info(f"Loading model from {file_path}")
+    model_info = torch.load(file_path)
+    model = SimilarityModel(model_info['input_size'])
+    model.load_state_dict(model_info['state_dict'])
+    return model
+
+
 def main():
     parser = argparse.ArgumentParser(description="SMOLPP: Audio Similarity Analyzer")
     parser.add_argument("input_file", help="Path to input audio file")
