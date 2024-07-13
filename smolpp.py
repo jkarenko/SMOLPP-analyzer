@@ -1,4 +1,5 @@
 import argparse
+import glob
 import logging
 import os
 import sys
@@ -9,7 +10,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logging.basicConfig(level=logging.WARNING, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 
@@ -153,7 +154,8 @@ def load_model(file_path):
 def main():
     parser = argparse.ArgumentParser(description="SMOLPP: Audio Similarity Analyzer")
     parser.add_argument("mode", choices=['train', 'analyze'], help="Mode of operation")
-    parser.add_argument("--input_file", help="Path to input audio file (required for analyze mode)")
+    parser.add_argument("--input_file",
+                        help="Path to input audio file(s) (required for analyze mode, supports wildcards)")
     parser.add_argument("--training_set",
                         help="Path to directory containing training audio files (required for train mode)")
     parser.add_argument("--debug", action="store_true", help="Enable debug logging")
@@ -197,8 +199,15 @@ def main():
             print("Model training completed.")
         elif args.mode == 'analyze':
             model = load_model(args.load_model)
-            similarity = analyze_similarity(model, args.input_file)
-            print(f"Similarity score: {similarity:.4f}")
+            input_files = glob.glob(os.path.expanduser(args.input_file))
+            if not input_files:
+                logger.error(f"No files found matching the pattern: {args.input_file}")
+                sys.exit(1)
+            for file in input_files:
+                similarity = analyze_similarity(model, file)
+                print(f"File: {file}")
+                print(f"Similarity score: {similarity:.4f}")
+                print("---")
     except Exception as e:
         logger.exception(f"An error occurred: {str(e)}")
         sys.exit(1)
