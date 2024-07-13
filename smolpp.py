@@ -17,7 +17,7 @@ import yt_dlp
 from sklearn.metrics import accuracy_score, f1_score, roc_auc_score
 from sklearn.model_selection import KFold
 
-logging.basicConfig(level=logging.WARNING, format='%(asctime)s - %(levelname)s - %(message)s')
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 scipy.signal.hann = scipy.signal.windows.hann
 
