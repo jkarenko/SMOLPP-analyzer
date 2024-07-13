@@ -74,8 +74,7 @@ def extract_features(audio_file, offset=0, duration=None):
         raise ValueError(f"Error extracting features from {audio_file}: {str(e)}")
 
 
-def calculate_metrics(y_true, y_pred, y_pred_proba):
-    y_pred_binary = (y_pred_proba > 0.5).float()
+def calculate_metrics(y_true, y_pred_proba):
     y_pred_binary = (y_pred_proba > 0.5).astype(int)
     accuracy = accuracy_score(y_true, y_pred_binary)
     f1 = f1_score(y_true, y_pred_binary)
@@ -168,7 +167,7 @@ def train_model(positive_dirs, negative_dirs, n_splits=5):
 
                 # Calculate additional metrics
                 val_accuracy, val_f1, val_auc = calculate_metrics(
-                    y_val.numpy(), val_outputs.numpy(), val_outputs.numpy()
+                    y_val.numpy(), val_outputs.numpy()
                 )
 
             if val_loss < best_val_loss:
