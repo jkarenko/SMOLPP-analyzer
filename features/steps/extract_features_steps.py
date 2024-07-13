@@ -2,6 +2,8 @@ import os
 import shutil
 import tempfile
 
+import numpy as np
+import soundfile as sf
 import torch
 from behave import given, when, then
 
@@ -11,15 +13,25 @@ from smolpp import extract_features, train_model, save_model, load_model, analyz
 @given('I have a valid audio file "{filename}"')
 def step_impl(context, filename):
     context.audio_file = os.path.join('test_data', filename)
-    assert os.path.exists(context.audio_file)
+    if not os.path.exists(context.audio_file):
+        # Create a dummy audio file
+        sample_rate = 44100
+        duration = 3  # seconds
+        t = np.linspace(0, duration, int(sample_rate * duration), False)
+        audio_data = np.sin(440 * 2 * np.pi * t)  # 440 Hz sine wave
+        sf.write(context.audio_file, audio_data, sample_rate, format='wav')
 
 
 @given('I have a directory "{dirname}" with audio files')
 def step_impl(context, dirname):
     context.training_set = tempfile.mkdtemp()
     for i in range(3):  # Create 3 dummy audio files
-        with open(os.path.join(context.training_set, f'audio_{i}.mp3'), 'w') as f:
-            f.write('dummy audio data')
+        filename = os.path.join(context.training_set, f'audio_{i}.wav')
+        sample_rate = 44100
+        duration = 2  # seconds
+        t = np.linspace(0, duration, int(sample_rate * duration), False)
+        audio_data = np.sin((440 + i * 100) * 2 * np.pi * t)  # Different frequencies
+        sf.write(filename, audio_data, sample_rate, format='wav')
 
 
 @when('I extract features from the audio file')
