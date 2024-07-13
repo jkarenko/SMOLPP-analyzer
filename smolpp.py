@@ -82,10 +82,8 @@ def calculate_metrics(y_true, y_pred_proba):
     return accuracy, f1, auc
 
 
-def normalize_features(features):
-    min_vals = np.min(features, axis=0)
-    max_vals = np.max(features, axis=0)
-    return (features - min_vals) / (max_vals - min_vals)
+def normalize_features(features, min_vals, max_vals):
+    return (features - min_vals) / (max_vals - min_vals + 1e-8)  # Add small epsilon to avoid division by zero
 
 
 def extract_and_cache_features(directory):
@@ -129,7 +127,12 @@ def train_model(positive_dirs, negative_dirs, n_splits=5):
 
     features = np.array(features)
     labels = np.array(labels)
-    normalized_features = normalize_features(features)
+
+    # Calculate normalization values
+    min_vals = np.min(features, axis=0)
+    max_vals = np.max(features, axis=0)
+
+    normalized_features = normalize_features(features, min_vals, max_vals)
 
     kf = KFold(n_splits=n_splits, shuffle=True, random_state=42)
 
@@ -213,11 +216,13 @@ def train_model(positive_dirs, negative_dirs, n_splits=5):
     return final_model
 
 
-def analyze_similarity(model, input_file, offset=0, duration=None):
+def analyze_similarity(model, min_vals, max_vals, input_file, offset=0, duration=None):
     logger.info(f"Analyzing similarity for {input_file}")
     try:
         features = extract_features(input_file, offset=offset, duration=duration)
-        x = torch.tensor(list(features.values()), dtype=torch.float32).unsqueeze(0)
+        feature_values = np.array(list(features.values()))
+        normalized_features = normalize_features(feature_values, min_vals, max_vals)
+        x = torch.tensor(normalized_features, dtype=torch.float32).unsqueeze(0)
         with torch.no_grad():
             similarity = model(x).item()
         logger.info(f"Similarity score: {similarity:.4f}")
@@ -227,11 +232,13 @@ def analyze_similarity(model, input_file, offset=0, duration=None):
         return 0.0
 
 
-def save_model(model, input_size, file_path):
+def save_model(model, input_size, min_vals, max_vals, file_path):
     logger.info(f"Saving model to {file_path}")
     model_info = {
         'state_dict': model.state_dict(),
-        'input_size': input_size
+        'input_size': input_size,
+        'min_vals': min_vals,
+        'max_vals': max_vals
     }
     torch.save(model_info, file_path)
 
@@ -241,7 +248,7 @@ def load_model(file_path):
     model_info = torch.load(file_path)
     model = SimilarityModel(model_info['input_size'])
     model.load_state_dict(model_info['state_dict'])
-    return model
+    return model, model_info['min_vals'], model_info['max_vals']
 
 
 def main():
@@ -293,9 +300,9 @@ def main():
     try:
         if args.mode == 'train':
             logger.info(f"Training model with positive and negative examples")
-            model = train_model(args.positive_dirs, args.negative_dirs)
+            model, min_vals, max_vals = train_model(args.positive_dirs, args.negative_dirs)
             if args.save_model:
-                save_model(model, model.fc1.in_features, args.save_model)
+                save_model(model, model.fc1.in_features, min_vals, max_vals, args.save_model)
             print("Model training completed.")
         elif args.mode == 'analyze':
 
@@ -313,7 +320,9 @@ def main():
                 if not os.path.exists(file):
                     logger.error(f"File not found: {file}")
                     continue
-                similarity = analyze_similarity(model, file, offset=args.offset, duration=args.duration)
+                model, min_vals, max_vals = load_model(args.load_model)
+                similarity = analyze_similarity(model, min_vals, max_vals, file, offset=args.offset,
+                                                duration=args.duration)
                 print(f"File: {file}")
                 print(f"Similarity score: {similarity:.4f}")
                 print("---")
