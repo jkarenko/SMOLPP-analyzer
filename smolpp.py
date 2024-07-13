@@ -91,19 +91,29 @@ def normalize_features(features):
 def extract_and_cache_features(directory):
     cache_file = os.path.join(directory, 'features.json')
     if os.path.exists(cache_file):
-        with open(cache_file, 'r') as f:
-            return json.load(f)
+        try:
+            with open(cache_file, 'r') as f:
+                return json.load(f)
+        except json.JSONDecodeError:
+            logger.warning(f"Corrupted cache file found in {directory}. Regenerating features.")
+            os.remove(cache_file)
+        except Exception as e:
+            logger.warning(f"Error reading cache file in {directory}: {str(e)}. Regenerating features.")
 
     features = {}
     for file in glob.glob(os.path.join(directory, '*.mp3')):
         try:
             file_features = extract_features(file)
+            # Convert numpy types to native Python types
             features[file] = [float(val) for val in file_features.values()]
         except ValueError as e:
             logger.warning(f"Skipping file {file}. {str(e)}")
 
-    with open(cache_file, 'w') as f:
-        json.dump(features, f)
+    try:
+        with open(cache_file, 'w') as f:
+            json.dump(features, f)
+    except Exception as e:
+        logger.warning(f"Failed to write cache file in {directory}: {str(e)}")
 
     return features
 
