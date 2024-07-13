@@ -1,0 +1,19 @@
+[tool.poetry]
+name = "smolpp"
+version = "0.1.0"
+description = ""
+authors = ["jkarenko <juho.karenko@gmail.com>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.11"
+librosa = "^0.10.2.post1"
+torch = "^2.3.1"
+pandas = "^2.2.2"
+numpy = "^2.0.0"
+seaborn = "^0.13.2"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
