@@ -13,6 +13,7 @@ import torch.optim as optim
 logging.basicConfig(level=logging.WARNING, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
+
 class SimilarityModel(nn.Module):
     def __init__(self, input_size):
         super(SimilarityModel, self).__init__()
@@ -29,6 +30,7 @@ class SimilarityModel(nn.Module):
         x = self.relu(self.fc3(x))
         x = self.sigmoid(self.fc4(x))
         return x
+
 
 def extract_features(audio_file):
     logger.info(f"Extracting features from {audio_file}")
@@ -51,25 +53,28 @@ def extract_features(audio_file):
         logger.error(f"Error extracting features from {audio_file}: {str(e)}")
         raise ValueError(f"Error extracting features from {audio_file}: {str(e)}")
 
+
 def normalize_features(features):
     min_vals = np.min(features, axis=0)
     max_vals = np.max(features, axis=0)
     return (features - min_vals) / (max_vals - min_vals)
 
-def train_model(positive_dir, negative_dir):
+
+def train_model(positive_dirs, negative_dirs):
     logger.info(f"Starting feature extraction for positive and negative examples")
     features = []
     labels = []
 
-    for label, directory in [(1, positive_dir), (0, negative_dir)]:
-        files = glob.glob(os.path.join(directory, '*.mp3'))
-        for file in files:
-            try:
-                file_features = extract_features(file)
-                features.append(list(file_features.values()))
-                labels.append(label)
-            except ValueError as e:
-                logger.warning(f"Skipping file {file}. {str(e)}")
+    for label, directories in [(1, positive_dirs), (0, negative_dirs)]:
+        for directory in directories:
+            files = glob.glob(os.path.join(directory, '*.mp3'))
+            for file in files:
+                try:
+                    file_features = extract_features(file)
+                    features.append(list(file_features.values()))
+                    labels.append(label)
+                except ValueError as e:
+                    logger.warning(f"Skipping file {file}. {str(e)}")
 
     if not features:
         logger.warning("No valid features extracted from training data")
@@ -120,6 +125,7 @@ def train_model(positive_dir, negative_dir):
     logger.info("Model training completed")
     return model
 
+
 def analyze_similarity(model, input_file):
     logger.info(f"Analyzing similarity for {input_file}")
     try:
@@ -133,6 +139,7 @@ def analyze_similarity(model, input_file):
         logger.error(f"Error analyzing input file: {str(e)}")
         return 0.0
 
+
 def save_model(model, input_size, file_path):
     logger.info(f"Saving model to {file_path}")
     model_info = {
@@ -141,6 +148,7 @@ def save_model(model, input_size, file_path):
     }
     torch.save(model_info, file_path)
 
+
 def load_model(file_path):
     logger.info(f"Loading model from {file_path}")
     model_info = torch.load(file_path)
@@ -148,12 +156,16 @@ def load_model(file_path):
     model.load_state_dict(model_info['state_dict'])
     return model
 
+
 def main():
     parser = argparse.ArgumentParser(description="SMOLPP: Audio Similarity Analyzer")
     parser.add_argument("mode", choices=['train', 'analyze'], help="Mode of operation")
-    parser.add_argument("--positive_dir", help="Path to directory containing positive example audio files (required for train mode)")
-    parser.add_argument("--negative_dir", help="Path to directory containing negative example audio files (required for train mode)")
-    parser.add_argument("--input_file", help="Path to input audio file(s) (required for analyze mode, supports wildcards)")
+    parser.add_argument("--positive_dirs", nargs='+',
+                        help="Paths to directories containing positive example audio files (required for train mode)")
+    parser.add_argument("--negative_dirs", nargs='+',
+                        help="Paths to directories containing negative example audio files (required for train mode)")
+    parser.add_argument("--input_file",
+                        help="Path to input audio file(s) (required for analyze mode, supports wildcards)")
     parser.add_argument("--debug", action="store_true", help="Enable debug logging")
     parser.add_argument("--save_model", help="Path to save the trained model")
     parser.add_argument("--load_model", help="Path to load a pre-trained model")
@@ -173,23 +185,26 @@ def main():
             sys.exit(1)
 
     if args.mode == 'train':
-        if not args.positive_dir or not args.negative_dir:
+        if not args.positive_dirs or not args.negative_dirs:
             logger.error("Both positive and negative directories are required for train mode.")
             sys.exit(1)
-        if not os.path.isdir(args.positive_dir) or not os.path.isdir(args.negative_dir):
-            logger.error(f"One or both of the specified directories do not exist.")
-            sys.exit(1)
-        positive_files = glob.glob(os.path.join(args.positive_dir, '*.mp3'))
-        negative_files = glob.glob(os.path.join(args.negative_dir, '*.mp3'))
+        for dir_list in [args.positive_dirs, args.negative_dirs]:
+            for directory in dir_list:
+                if not os.path.isdir(directory):
+                    logger.error(f"Directory does not exist: {directory}")
+                    sys.exit(1)
+        positive_files = [f for d in args.positive_dirs for f in glob.glob(os.path.join(d, '*.mp3'))]
+        negative_files = [f for d in args.negative_dirs for f in glob.glob(os.path.join(d, '*.mp3'))]
         if not positive_files or not negative_files:
-            logger.error(f"No .mp3 files found in one or both of the specified directories.")
+            logger.error(f"No .mp3 files found in one or more of the specified directories.")
             sys.exit(1)
-        logger.info(f"Found {len(positive_files)} positive examples and {len(negative_files)} negative examples for training")
+        logger.info(
+            f"Found {len(positive_files)} positive examples and {len(negative_files)} negative examples for training")
 
     try:
         if args.mode == 'train':
             logger.info(f"Training model with positive and negative examples")
-            model = train_model(args.positive_dir, args.negative_dir)
+            model = train_model(args.positive_dirs, args.negative_dirs)
             if args.save_model:
                 save_model(model, model.fc1.in_features, args.save_model)
             print("Model training completed.")
@@ -209,6 +224,7 @@ def main():
         sys.exit(1)
 
     logger.debug("SMOLPP completed successfully")
+
 
 if __name__ == "__main__":
     main()
