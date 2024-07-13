@@ -75,7 +75,7 @@ def train_model(training_data):
         # Instead of raising an exception, return a dummy model
         return SimilarityModel(4)  # 4 is the number of features we extract
 
-    x = torch.tensor(features, dtype=torch.float32)
+    x = torch.tensor(np.array(features), dtype=torch.float32)
 
     logger.info(f"Initializing model with input size {x.shape[1]}")
     model = SimilarityModel(x.shape[1])
