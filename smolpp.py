@@ -6,12 +6,14 @@ import sys
 
 import librosa
 import numpy as np
+import scipy
 import torch
 import torch.nn as nn
 import torch.optim as optim
 
 logging.basicConfig(level=logging.WARNING, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
+scipy.signal.hann = scipy.signal.windows.hann
 
 
 class SimilarityModel(nn.Module):
