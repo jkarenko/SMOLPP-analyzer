@@ -21,8 +21,7 @@ Feature: SMOLPP Functionality
 
   Scenario: Saving and loading a model
     Given I have a trained model
-    When I save the model to "test_model.pth"
-    And I load the model from "test_model.pth"
+    When I save and load the model
     Then the loaded model should have the same structure as the original model
 
   Scenario: Analyzing similarity

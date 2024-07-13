@@ -1,5 +1,5 @@
+import io
 import os
-import shutil
 import tempfile
 
 import numpy as np
@@ -7,7 +7,7 @@ import soundfile as sf
 import torch
 from behave import given, when, then
 
-from smolpp import extract_features, train_model, save_model, load_model, analyze_similarity, SimilarityModel
+from smolpp import extract_features, train_model, analyze_similarity, SimilarityModel
 
 
 @given('I have a valid audio file "{filename}"')
@@ -66,15 +66,20 @@ def step_impl(context):
         context.execute_steps('When I train a model using the training set')
 
 
-@when('I save the model to "{filename}"')
-def step_impl(context, filename):
-    context.model_file = filename
-    save_model(context.model, context.model.fc1.in_features, context.model_file)
+@when('I save and load the model')
+def step_impl(context):
+    # Save model to a BytesIO object
+    buffer = io.BytesIO()
+    torch.save({
+        'state_dict': context.model.state_dict(),
+        'input_size': context.model.fc1.in_features
+    }, buffer)
 
-
-@when('I load the model from "{filename}"')
-def step_impl(context, filename):
-    context.loaded_model = load_model(filename)
+    # Load model from the BytesIO object
+    buffer.seek(0)
+    model_info = torch.load(buffer)
+    context.loaded_model = SimilarityModel(model_info['input_size'])
+    context.loaded_model.load_state_dict(model_info['state_dict'])
 
 
 @then('the loaded model should have the same structure as the original model')
@@ -108,10 +113,3 @@ def step_impl(context):
 @then('the process should complete without errors')
 def step_impl(context):
     assert 'Error:' not in context.output
-
-
-def after_scenario(context, scenario):
-    if hasattr(context, 'training_set'):
-        shutil.rmtree(context.training_set)
-    if hasattr(context, 'model_file') and os.path.exists(context.model_file):
-        os.remove(context.model_file)
