@@ -5,6 +5,7 @@ import logging
 import os
 import sys
 import tempfile
+from contextlib import contextmanager
 
 import librosa
 import numpy as np
@@ -39,18 +40,27 @@ class SimilarityModel(nn.Module):
         return x
 
 
-def download_youtube_audio(url, output_path):
-    ydl_opts = {
-        'format': 'bestaudio/best',
-        'postprocessors': [{
-            'key': 'FFmpegExtractAudio',
-            'preferredcodec': 'mp3',
-            'preferredquality': '192',
-        }],
-        'outtmpl': output_path,
-    }
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        ydl.download([url])
+@contextmanager
+def youtube_audio(url):
+    with tempfile.TemporaryDirectory() as temp_dir:
+        output_template = os.path.join(temp_dir, '%(title)s.%(ext)s')
+        ydl_opts = {
+            'format': 'bestaudio/best',
+            'postprocessors': [{
+                'key': 'FFmpegExtractAudio',
+                'preferredcodec': 'mp3',
+                'preferredquality': '192',
+            }],
+            'outtmpl': output_template,
+        }
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=True)
+            filename = ydl.prepare_filename(info)
+            audio_path = os.path.splitext(filename)[0] + '.mp3'
+            if os.path.exists(audio_path):
+                yield audio_path
+            else:
+                raise FileNotFoundError(f"Downloaded audio file not found: {audio_path}")
 
 
 def extract_features(audio_file, offset=0, duration=None):
@@ -236,26 +246,25 @@ def analyze_similarity(model, min_vals, max_vals, input_file, offset=0, duration
     logger.info(f"Analyzing similarity for {'YouTube video' if is_youtube_url else 'file'}: {input_file}")
     try:
         if is_youtube_url:
-            with tempfile.NamedTemporaryFile(suffix='.mp3', delete=False) as temp_file:
-                temp_path = temp_file.name
-            download_youtube_audio(input_file, temp_path)
-            input_file = temp_path
-
-        features = extract_features(input_file, offset=offset, duration=duration)
-        feature_values = np.array(list(features.values()))
-        normalized_features = normalize_features(feature_values, min_vals, max_vals)
-        x = torch.tensor(normalized_features, dtype=torch.float32).unsqueeze(0)
-        with torch.no_grad():
-            similarity = model(x).item()
-        logger.info(f"Similarity score: {similarity:.4f}")
-
-        if is_youtube_url:
-            os.unlink(temp_path)
-
-        return similarity
+            with youtube_audio(input_file) as audio_file:
+                logger.info(f"Downloaded YouTube audio to: {audio_file}")
+                return analyze_audio_file(model, min_vals, max_vals, audio_file, offset, duration)
+        else:
+            return analyze_audio_file(model, min_vals, max_vals, input_file, offset, duration)
     except Exception as e:
         logger.error(f"Error analyzing input: {str(e)}")
         return 0.0
+
+
+def analyze_audio_file(model, min_vals, max_vals, audio_file, offset=0, duration=None):
+    features = extract_features(audio_file, offset=offset, duration=duration)
+    feature_values = np.array(list(features.values()))
+    normalized_features = normalize_features(feature_values, min_vals, max_vals)
+    x = torch.tensor(normalized_features, dtype=torch.float32).unsqueeze(0)
+    with torch.no_grad():
+        similarity = model(x).item()
+    logger.info(f"Similarity score: {similarity:.4f}")
+    return similarity
 
 
 def save_model(model, input_size, min_vals, max_vals, file_path):
