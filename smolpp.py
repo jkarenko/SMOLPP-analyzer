@@ -321,7 +321,7 @@ def main():
                     continue
                 similarity = analyze_similarity(model, min_vals, max_vals, file, offset=args.offset, duration=args.duration)
                 print(f"File: {file}")
-                print(f"Similarity score: {similarity:.4f}")
+                print(f"Similarity score: {similarity * 100:.2f}%")
                 print("---")
     except Exception as e:
         logger.exception(f"An error occurred: {str(e)}")
