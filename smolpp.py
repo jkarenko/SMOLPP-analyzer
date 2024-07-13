@@ -10,6 +10,7 @@ import scipy
 import torch
 import torch.nn as nn
 import torch.optim as optim
+from sklearn.metrics import accuracy_score, f1_score, roc_auc_score
 from sklearn.model_selection import KFold
 
 logging.basicConfig(level=logging.WARNING, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -72,6 +73,14 @@ def extract_features(audio_file, offset=0, duration=None):
         raise ValueError(f"Error extracting features from {audio_file}: {str(e)}")
 
 
+def calculate_metrics(y_true, y_pred, y_pred_proba):
+    y_pred_binary = (y_pred_proba > 0.5).float()
+    accuracy = accuracy_score(y_true, y_pred_binary)
+    f1 = f1_score(y_true, y_pred_binary)
+    auc = roc_auc_score(y_true, y_pred_proba)
+    return accuracy, f1, auc
+
+
 def normalize_features(features):
     min_vals = np.min(features, axis=0)
     max_vals = np.max(features, axis=0)
@@ -112,8 +121,12 @@ def train_model(positive_dirs, negative_dirs, n_splits=5):
         criterion = nn.BCELoss()
         optimizer = optim.Adam(model.parameters(), lr=0.001, weight_decay=0.01)
 
-        # Training loop (similar to original, but for fewer epochs)
-        n_epochs = 200  # Reduced for CV
+        best_val_loss = float('inf')
+        best_val_metrics = None
+        patience = 20
+        epochs_without_improvement = 0
+
+        n_epochs = 200
         for epoch in range(n_epochs):
             model.train()
             optimizer.zero_grad()
@@ -127,13 +140,34 @@ def train_model(positive_dirs, negative_dirs, n_splits=5):
                 val_outputs = model(x_val)
                 val_loss = criterion(val_outputs, y_val)
 
+                # Calculate additional metrics
+                val_accuracy, val_f1, val_auc = calculate_metrics(
+                    y_val.numpy(), val_outputs.numpy(), val_outputs.numpy()
+                )
+
+            if val_loss < best_val_loss:
+                best_val_loss = val_loss
+                best_val_metrics = (val_accuracy, val_f1, val_auc)
+                epochs_without_improvement = 0
+            else:
+                epochs_without_improvement += 1
+
+            if epochs_without_improvement >= patience:
+                logger.info(f"Early stopping triggered at epoch {epoch + 1}")
+                break
+
             if (epoch + 1) % 50 == 0:
                 logger.info(f'Fold {fold + 1}, Epoch [{epoch + 1}/{n_epochs}], '
-                            f'Train Loss: {train_loss.item():.4f}, Val Loss: {val_loss.item():.4f}')
+                            f'Train Loss: {train_loss.item():.4f}, Val Loss: {val_loss.item():.4f}, '
+                            f'Val Accuracy: {val_accuracy:.4f}, Val F1: {val_f1:.4f}, Val AUC: {val_auc:.4f}')
 
-        fold_results.append(val_loss.item())
+        fold_results.append((best_val_loss, *best_val_metrics))
 
-    logger.info(f"Cross-validation complete. Mean validation loss: {np.mean(fold_results):.4f}")
+    # Log mean results across folds
+    mean_loss, mean_accuracy, mean_f1, mean_auc = np.mean(fold_results, axis=0)
+    logger.info(f"Cross-validation complete. "
+                f"Mean validation - Loss: {mean_loss:.4f}, Accuracy: {mean_accuracy:.4f}, "
+                f"F1: {mean_f1:.4f}, AUC: {mean_auc:.4f}")
 
     # Train final model on all data
     x_all = torch.tensor(normalized_features, dtype=torch.float32)
