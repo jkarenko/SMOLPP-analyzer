@@ -1,6 +1,7 @@
 import argparse
 import logging
 import os
+import random
 import sys
 
 import librosa
@@ -19,13 +20,16 @@ class SimilarityModel(nn.Module):
         super(SimilarityModel, self).__init__()
         self.fc1 = nn.Linear(input_size, 64)
         self.fc2 = nn.Linear(64, 32)
-        self.fc3 = nn.Linear(32, 1)
+        self.fc3 = nn.Linear(32, 16)
+        self.fc4 = nn.Linear(16, 1)
+        self.relu = nn.ReLU()
         self.sigmoid = nn.Sigmoid()
 
     def forward(self, x):
-        x = torch.relu(self.fc1(x))
-        x = torch.relu(self.fc2(x))
-        x = self.sigmoid(self.fc3(x))
+        x = self.relu(self.fc1(x))
+        x = self.relu(self.fc2(x))
+        x = self.relu(self.fc3(x))
+        x = self.sigmoid(self.fc4(x))
         return x
 
 
@@ -58,7 +62,7 @@ def extract_features(audio_file):
         raise ValueError(f"Error extracting features from {audio_file}: {str(e)}")
 
     features = {
-        'tempo': tempo,
+        'tempo': float(tempo),
         'chroma_mean': chroma_mean,
         'mfcc_mean': mfcc_mean,
         'spectral_centroid_mean': spectral_centroid_mean
@@ -66,6 +70,12 @@ def extract_features(audio_file):
 
     logger.debug(f"Extracted features: {features}")
     return features
+
+
+def normalize_features(features):
+    min_vals = np.min(features, axis=0)
+    max_vals = np.max(features, axis=0)
+    return (features - min_vals) / (max_vals - min_vals)
 
 
 def train_model(training_data):
@@ -86,25 +96,49 @@ def train_model(training_data):
         logger.warning("No valid features extracted from training data")
         return SimilarityModel(4)  # 4 is the number of features we extract
 
-    x = torch.tensor(np.array(features), dtype=torch.float32)
+    features = np.array(features)
+    normalized_features = normalize_features(features)
 
-    logger.info(f"Initializing model with input size {x.shape[1]}")
-    model = SimilarityModel(x.shape[1])
-    criterion = nn.MSELoss()
-    optimizer = optim.Adam(model.parameters())
+    # Shuffle and split the data
+    indices = np.arange(normalized_features.shape[0])
+    np.random.shuffle(indices)
+    split = int(0.8 * len(indices))
+    train_indices = indices[:split]
+    val_indices = indices[split:]
 
-    n_epochs = 100
+    x_train = torch.tensor(normalized_features[train_indices], dtype=torch.float32)
+    x_val = torch.tensor(normalized_features[val_indices], dtype=torch.float32)
+
+    logger.info(f"Initializing model with input size {x_train.shape[1]}")
+    model = SimilarityModel(x_train.shape[1])
+    criterion = nn.BCELoss()
+    optimizer = optim.Adam(model.parameters(), lr=0.01)
+
+    n_epochs = 1000  # Increase number of epochs
     logger.info(f"Starting model training for {n_epochs} epochs")
     try:
         for epoch in range(n_epochs):
+            model.train()
             optimizer.zero_grad()
-            outputs = model(x)
-            loss = criterion(outputs, torch.ones_like(outputs))
-            loss.backward()
+            train_outputs = model(x_train)
+            train_loss = criterion(train_outputs, torch.ones_like(train_outputs))
+            train_loss.backward()
             optimizer.step()
 
-            if (epoch + 1) % 10 == 0:
-                logger.info(f'Epoch [{epoch + 1}/{n_epochs}], Loss: {loss.item():.4f}')
+            model.eval()
+            with torch.no_grad():
+                val_outputs = model(x_val)
+                val_loss = criterion(val_outputs, torch.ones_like(val_outputs))
+
+            if (epoch + 1) % 100 == 0:  # Log every 100 epochs
+                logger.info(
+                    f'Epoch [{epoch + 1}/{n_epochs}], Train Loss: {train_loss.item():.4f}, Val Loss: {val_loss.item():.4f}')
+
+            # Early stopping
+            if train_loss.item() < 0.01:  # Stop if loss is very low
+                logger.info(f"Stopping early at epoch {epoch + 1} due to low loss")
+                break
+
     except RuntimeError as e:
         logger.error(f"Error during model training: {str(e)}")
         raise ValueError(f"Error during model training: {str(e)}")
@@ -173,6 +207,8 @@ def main():
     if not training_files:
         logger.error(f"No .mp3 or .wav files found in the training set directory.")
         sys.exit(1)
+
+    logger.info(f"Found {len(training_files)} audio files for training")
 
     try:
         if args.mode == 'train':
