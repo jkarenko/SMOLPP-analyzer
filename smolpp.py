@@ -4,6 +4,7 @@ import logging
 import os
 import sys
 
+import librosa
 import numpy as np
 import scipy
 import torch
@@ -36,10 +37,9 @@ class SimilarityModel(nn.Module):
 def extract_features(audio_file):
     logger.info(f"Extracting features from {audio_file}")
     try:
-        import librosa
-        y, sr = librosa.load(audio_file, duration=10)  # Load only first 10 seconds
+        y, sr = librosa.load(audio_file)
 
-        features = {'tempo': librosa.beat.tempo(y=y, sr=sr)[0],
+        features = {'tempo': librosa.feature.rhythm.tempo(y=y, sr=sr)[0],
                     'zero_crossing_rate': np.mean(librosa.feature.zero_crossing_rate(y)),
                     'spectral_centroid': np.mean(librosa.feature.spectral_centroid(y=y, sr=sr)),
                     'spectral_rolloff': np.mean(librosa.feature.spectral_rolloff(y=y, sr=sr))}
