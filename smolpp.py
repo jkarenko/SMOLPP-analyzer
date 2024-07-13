@@ -34,17 +34,15 @@ class SimilarityModel(nn.Module):
         return x
 
 
-def extract_features(audio_file):
+def extract_features(audio_file, offset=0, duration=None):
     logger.info(f"Extracting features from {audio_file}")
     try:
-        y, sr = librosa.load(audio_file)
+        y, sr = librosa.load(audio_file, offset=offset, duration=duration)
 
-        features = {'tempo': librosa.feature.rhythm.tempo(y=y, sr=sr)[0],
+        features = {'tempo': librosa.feature.tempo(y=y, sr=sr)[0],
                     'zero_crossing_rate': np.mean(librosa.feature.zero_crossing_rate(y)),
                     'spectral_centroid': np.mean(librosa.feature.spectral_centroid(y=y, sr=sr)),
                     'spectral_rolloff': np.mean(librosa.feature.spectral_rolloff(y=y, sr=sr))}
-
-        # Basic features
 
         # Mel-frequency cepstral coefficients
         mfcc = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=13)
@@ -155,10 +153,10 @@ def train_model(positive_dirs, negative_dirs):
     return model
 
 
-def analyze_similarity(model, input_file):
+def analyze_similarity(model, input_file, offset=0, duration=None):
     logger.info(f"Analyzing similarity for {input_file}")
     try:
-        features = extract_features(input_file)
+        features = extract_features(input_file, offset=offset, duration=duration)
         x = torch.tensor(list(features.values()), dtype=torch.float32).unsqueeze(0)
         with torch.no_grad():
             similarity = model(x).item()
@@ -198,6 +196,8 @@ def main():
     parser.add_argument("--debug", action="store_true", help="Enable debug logging")
     parser.add_argument("--save_model", help="Path to save the trained model")
     parser.add_argument("--load_model", help="Path to load a pre-trained model")
+    parser.add_argument("--offset", type=float, default=0, help="Start reading audio from this time (in seconds)")
+    parser.add_argument("--duration", type=float, default=None, help="Only load up to this much audio (in seconds)")
     args = parser.parse_args()
 
     if args.debug:
@@ -238,13 +238,22 @@ def main():
                 save_model(model, model.fc1.in_features, args.save_model)
             print("Model training completed.")
         elif args.mode == 'analyze':
+
             model = load_model(args.load_model)
-            input_files = glob.glob(os.path.expanduser(args.input_file))
+            if '*' in args.input_file:
+                input_files = glob.glob(os.path.expanduser(args.input_file))
+            else:
+                input_files = [os.path.expanduser(args.input_file)]
+
             if not input_files:
                 logger.error(f"No files found matching the pattern: {args.input_file}")
                 sys.exit(1)
+
             for file in input_files:
-                similarity = analyze_similarity(model, file)
+                if not os.path.exists(file):
+                    logger.error(f"File not found: {file}")
+                    continue
+                similarity = analyze_similarity(model, file, offset=args.offset, duration=args.duration)
                 print(f"File: {file}")
                 print(f"Similarity score: {similarity:.4f}")
                 print("---")
