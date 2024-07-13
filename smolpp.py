@@ -46,12 +46,12 @@ def extract_features(audio_file):
         logger.error(f"Error extracting features from {audio_file}: {str(e)}")
         raise ValueError(f"Error extracting features from {audio_file}: {str(e)}")
 
-    features = {
-        'tempo': tempo,
-        'chroma_mean': np.mean(chroma),
-        'mfcc_mean': np.mean(mfcc),
-        'spectral_centroid_mean': np.mean(spectral_centroid)
-    }
+    features = np.array([
+        tempo,
+        np.mean(chroma),
+        np.mean(mfcc),
+        np.mean(spectral_centroid)
+    ], dtype=np.float32)
 
     logger.debug(f"Extracted features: {features}")
     return features
@@ -75,10 +75,10 @@ def train_model(training_data):
         # Instead of raising an exception, return a dummy model
         return SimilarityModel(4)  # 4 is the number of features we extract
 
-    X = torch.tensor([list(f.values()) for f in features], dtype=torch.float32)
+    x = torch.tensor(features, dtype=torch.float32)
 
-    logger.info(f"Initializing model with input size {X.shape[1]}")
-    model = SimilarityModel(X.shape[1])
+    logger.info(f"Initializing model with input size {x.shape[1]}")
+    model = SimilarityModel(x.shape[1])
     criterion = nn.MSELoss()
     optimizer = optim.Adam(model.parameters())
 
@@ -87,7 +87,7 @@ def train_model(training_data):
     try:
         for epoch in range(n_epochs):
             optimizer.zero_grad()
-            outputs = model(X)
+            outputs = model(x)
             loss = criterion(outputs, torch.ones_like(outputs))
             loss.backward()
             optimizer.step()
@@ -110,9 +110,9 @@ def analyze_similarity(model, input_file):
         logger.error(f"Error analyzing input file: {str(e)}")
         return 0.0  # Return 0 similarity if we can't extract features
 
-    X = torch.tensor(list(features.values()), dtype=torch.float32).unsqueeze(0)
+    x = torch.tensor(features, dtype=torch.float32).unsqueeze(0)
     with torch.no_grad():
-        similarity = model(X).item()
+        similarity = model(x).item()
     logger.info(f"Similarity score: {similarity:.4f}")
     return similarity
 
