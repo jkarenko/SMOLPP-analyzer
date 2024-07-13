@@ -38,19 +38,30 @@ def extract_features(audio_file):
         raise ValueError(f"Error loading audio file {audio_file}: {str(e)}")
 
     try:
+        # Tempo
         tempo, _ = librosa.beat.beat_track(y=y, sr=sr)
+
+        # Chroma
         chroma = librosa.feature.chroma_stft(y=y, sr=sr)
+        chroma_mean = np.mean(chroma)
+
+        # MFCC
         mfcc = librosa.feature.mfcc(y=y, sr=sr)
+        mfcc_mean = np.mean(mfcc)
+
+        # Spectral Centroid
         spectral_centroid = librosa.feature.spectral_centroid(y=y, sr=sr)
+        spectral_centroid_mean = np.mean(spectral_centroid)
+
     except Exception as e:
         logger.error(f"Error extracting features from {audio_file}: {str(e)}")
         raise ValueError(f"Error extracting features from {audio_file}: {str(e)}")
 
     features = np.array([
         tempo,
-        np.mean(chroma),
-        np.mean(mfcc),
-        np.mean(spectral_centroid)
+        chroma_mean,
+        mfcc_mean,
+        spectral_centroid_mean
     ], dtype=np.float32)
 
     logger.debug(f"Extracted features: {features}")
@@ -106,15 +117,14 @@ def analyze_similarity(model, input_file):
     logger.info(f"Analyzing similarity for {input_file}")
     try:
         features = extract_features(input_file)
-    except ValueError as e:
+        x = torch.tensor(features, dtype=torch.float32).unsqueeze(0)
+        with torch.no_grad():
+            similarity = model(x).item()
+        logger.info(f"Similarity score: {similarity:.4f}")
+        return similarity
+    except Exception as e:
         logger.error(f"Error analyzing input file: {str(e)}")
-        return 0.0  # Return 0 similarity if we can't extract features
-
-    x = torch.tensor(features, dtype=torch.float32).unsqueeze(0)
-    with torch.no_grad():
-        similarity = model(x).item()
-    logger.info(f"Similarity score: {similarity:.4f}")
-    return similarity
+        return 0.0  # Return 0 similarity if we can't extract features or process them
 
 
 def save_model(model, input_size, file_path):
