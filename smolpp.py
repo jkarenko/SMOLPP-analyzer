@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import sys
+import tempfile
 
 import librosa
 import numpy as np
@@ -11,6 +12,7 @@ import scipy
 import torch
 import torch.nn as nn
 import torch.optim as optim
+import yt_dlp
 from sklearn.metrics import accuracy_score, f1_score, roc_auc_score
 from sklearn.model_selection import KFold
 
@@ -35,6 +37,20 @@ class SimilarityModel(nn.Module):
         x = self.relu(self.fc3(x))
         x = self.sigmoid(self.fc4(x))
         return x
+
+
+def download_youtube_audio(url, output_path):
+    ydl_opts = {
+        'format': 'bestaudio/best',
+        'postprocessors': [{
+            'key': 'FFmpegExtractAudio',
+            'preferredcodec': 'mp3',
+            'preferredquality': '192',
+        }],
+        'outtmpl': output_path,
+    }
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        ydl.download([url])
 
 
 def extract_features(audio_file, offset=0, duration=None):
@@ -216,9 +232,15 @@ def train_model(positive_dirs, negative_dirs, n_splits=5):
     return final_model, min_vals, max_vals
 
 
-def analyze_similarity(model, min_vals, max_vals, input_file, offset=0, duration=None):
-    logger.info(f"Analyzing similarity for {input_file}")
+def analyze_similarity(model, min_vals, max_vals, input_file, offset=0, duration=None, is_youtube_url=False):
+    logger.info(f"Analyzing similarity for {'YouTube video' if is_youtube_url else 'file'}: {input_file}")
     try:
+        if is_youtube_url:
+            with tempfile.NamedTemporaryFile(suffix='.mp3', delete=False) as temp_file:
+                temp_path = temp_file.name
+            download_youtube_audio(input_file, temp_path)
+            input_file = temp_path
+
         features = extract_features(input_file, offset=offset, duration=duration)
         feature_values = np.array(list(features.values()))
         normalized_features = normalize_features(feature_values, min_vals, max_vals)
@@ -226,9 +248,13 @@ def analyze_similarity(model, min_vals, max_vals, input_file, offset=0, duration
         with torch.no_grad():
             similarity = model(x).item()
         logger.info(f"Similarity score: {similarity:.4f}")
+
+        if is_youtube_url:
+            os.unlink(temp_path)
+
         return similarity
     except Exception as e:
-        logger.error(f"Error analyzing input file: {str(e)}")
+        logger.error(f"Error analyzing input: {str(e)}")
         return 0.0
 
 
@@ -265,6 +291,7 @@ def main():
     parser.add_argument("--load_model", help="Path to load a pre-trained model")
     parser.add_argument("--offset", type=float, default=0, help="Start reading audio from this time (in seconds)")
     parser.add_argument("--duration", type=float, default=None, help="Only load up to this much audio (in seconds)")
+    parser.add_argument("--yt-dlp", action="store_true", help="Treat input as URL and download audio using yt-dlp")
     args = parser.parse_args()
 
     if args.debug:
@@ -306,21 +333,27 @@ def main():
             print("Model training completed.")
         elif args.mode == 'analyze':
             model, min_vals, max_vals = load_model(args.load_model)
-            if '*' in args.input_file:
+            if args.yt_dlp:
+                if not args.input_file.startswith('http'):
+                    logger.error("Invalid YouTube URL")
+                    sys.exit(1)
+                input_files = [args.input_file]
+            elif '*' in args.input_file:
                 input_files = glob.glob(os.path.expanduser(args.input_file))
             else:
                 input_files = [os.path.expanduser(args.input_file)]
 
             if not input_files:
-                logger.error(f"No files found matching the pattern: {args.input_file}")
+                logger.error(f"No {'URLs' if args.yt_dlp else 'files'} found matching the input")
                 sys.exit(1)
 
             for file in input_files:
-                if not os.path.exists(file):
+                if not args.yt_dlp and not os.path.exists(file):
                     logger.error(f"File not found: {file}")
                     continue
-                similarity = analyze_similarity(model, min_vals, max_vals, file, offset=args.offset, duration=args.duration)
-                print(f"File: {file}")
+                similarity = analyze_similarity(model, min_vals, max_vals, file, offset=args.offset,
+                                                duration=args.duration, is_youtube_url=args.yt_dlp)
+                print(f"{'YouTube video' if args.yt_dlp else 'File'}: {file}")
                 print(f"Similarity score: {similarity * 100:.2f}%")
                 print("---")
     except Exception as e:
