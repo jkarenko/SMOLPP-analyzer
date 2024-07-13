@@ -76,6 +76,7 @@ def extract_features(audio_file, offset=0, duration=None):
 
 def calculate_metrics(y_true, y_pred, y_pred_proba):
     y_pred_binary = (y_pred_proba > 0.5).float()
+    y_pred_binary = (y_pred_proba > 0.5).astype(int)
     accuracy = accuracy_score(y_true, y_pred_binary)
     f1 = f1_score(y_true, y_pred_binary)
     auc = roc_auc_score(y_true, y_pred_proba)
