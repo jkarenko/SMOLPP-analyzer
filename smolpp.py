@@ -146,7 +146,8 @@ def load_model(file_path):
 
 def main():
     parser = argparse.ArgumentParser(description="SMOLPP: Audio Similarity Analyzer")
-    parser.add_argument("input_file", help="Path to input audio file")
+    parser.add_argument("mode", choices=['train', 'analyze'], help="Mode of operation")
+    parser.add_argument("--input_file", help="Path to input audio file (required for analyze mode)")
     parser.add_argument("training_set", help="Path to directory containing training audio files")
     parser.add_argument("--debug", action="store_true", help="Enable debug logging")
     parser.add_argument("--save_model", help="Path to save the trained model")
@@ -158,34 +159,40 @@ def main():
 
     logger.debug("Starting SMOLPP")
 
-    if not os.path.exists(args.input_file):
-        logger.error(f"Input file '{args.input_file}' does not exist.")
+    if args.mode == 'analyze' and not args.input_file:
+        logger.error("Input file is required for analyze mode.")
         sys.exit(1)
 
-    if not args.load_model:
-        if not os.path.isdir(args.training_set):
-            logger.error(f"Training set directory '{args.training_set}' does not exist.")
-            sys.exit(1)
+    if not os.path.isdir(args.training_set):
+        logger.error(f"Training set directory '{args.training_set}' does not exist.")
+        sys.exit(1)
 
-        training_files = [os.path.join(args.training_set, f) for f in os.listdir(args.training_set) if
-                          f.endswith(('.mp3', '.wav'))]
+    training_files = [os.path.join(args.training_set, f) for f in os.listdir(args.training_set) if
+                      f.endswith(('.mp3', '.wav'))]
 
-        if not training_files:
-            logger.error(f"No .mp3 or .wav files found in the training set directory.")
-            sys.exit(1)
+    if not training_files:
+        logger.error(f"No .mp3 or .wav files found in the training set directory.")
+        sys.exit(1)
 
     try:
-        if args.load_model:
-            model = load_model(args.load_model)
-        else:
+        if args.mode == 'train':
             logger.info(f"Training model with {len(training_files)} files")
             model = train_model(training_files)
 
             if args.save_model:
                 save_model(model, model.fc1.in_features, args.save_model)
+            print("Model training completed.")
 
-        similarity = analyze_similarity(model, args.input_file)
-        print(f"Similarity score: {similarity:.4f}")
+        elif args.mode == 'analyze':
+            if args.load_model:
+                model = load_model(args.load_model)
+            else:
+                logger.info(f"Training model with {len(training_files)} files")
+                model = train_model(training_files)
+
+            similarity = analyze_similarity(model, args.input_file)
+            print(f"Similarity score: {similarity:.4f}")
+
     except ValueError as e:
         logger.error(str(e))
         sys.exit(1)
