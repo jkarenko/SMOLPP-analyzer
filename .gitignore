@@ -114,14 +114,8 @@ dmypy.json
 # Pyre type checker
 .pyre/
 
-# Poetry virtual environments
-.venv
-
 # VS Code configurations
 .vscode/
-
-# IntelliJ IDEA
-.idea/
 
 # JetBrains project files
 .idea/
