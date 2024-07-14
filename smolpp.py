@@ -255,12 +255,12 @@ def extract_and_cache_features(directory):
     return features
 
 
-def train_model(positive_dirs, negative_dirs, n_splits=5):
+def train_model(positive_dirs, negative_dirs, n_splits=5, use_gpu=False):
     features = []
     labels = []
     for label, directories in [(1, positive_dirs), (0, negative_dirs)]:
         for directory in directories:
-            dir_features = extract_and_cache_features(directory)
+            dir_features = extract_and_cache_features(directory, use_gpu)
             features.extend(dir_features.values())
             labels.extend([label] * len(dir_features))
 
