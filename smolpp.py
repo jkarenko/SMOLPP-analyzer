@@ -64,7 +64,7 @@ def youtube_audio(url):
 
 
 def extract_features(audio_file, offset=0, duration=None):
-    logger.debug(f"Extracting features from {audio_file}")
+    logger.info(f"Extracting features from {audio_file}")
     try:
         y, sr = librosa.load(audio_file, offset=offset, duration=duration)
 
