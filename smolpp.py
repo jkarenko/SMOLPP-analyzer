@@ -112,6 +112,14 @@ def normalize_features(features, min_vals, max_vals):
     return (features - min_vals) / (max_vals - min_vals + 1e-8)  # Add small epsilon to avoid division by zero
 
 
+def extract_features_for_directory(directory):
+    features = extract_and_cache_features(directory)
+    cache_file = os.path.join(directory, 'features.json')
+    with open(cache_file, 'w') as f:
+        json.dump(features, f, indent=2)
+    logger.info(f"Features extracted and saved to {cache_file}")
+
+
 def extract_and_cache_features(directory):
     cache_file = os.path.join(directory, 'features.json')
     if os.path.exists(cache_file):
@@ -288,7 +296,9 @@ def load_model(file_path):
 
 def main():
     parser = argparse.ArgumentParser(description="SMOLPP: Audio Similarity Analyzer")
-    parser.add_argument("mode", choices=['train', 'predict'], help="Mode of operation")
+    parser.add_argument("mode", choices=['train', 'predict', 'extract'], help="Mode of operation")
+    parser.add_argument("--dirs", nargs='+',
+                        help="Paths to directories containing audio files (required for extract mode)")
     parser.add_argument("--positive_dirs", nargs='+',
                         help="Paths to directories containing positive example audio files (required for train mode)")
     parser.add_argument("--negative_dirs", nargs='+',
@@ -307,6 +317,18 @@ def main():
         logger.setLevel(logging.DEBUG)
 
     logger.debug("Starting SMOLPP")
+
+    if args.mode == 'extract':
+        if not args.dirs:
+            logger.error("At least one directory is required for extract mode.")
+            sys.exit(1)
+        for directory in args.dirs:
+            if not os.path.isdir(directory):
+                logger.error(f"Directory does not exist: {directory}")
+                sys.exit(1)
+            extract_features_for_directory(directory)
+        logger.info("Feature extraction completed for all specified directories.")
+        sys.exit(0)
 
     if args.mode == 'predict':
         if not args.input_file:
