@@ -427,7 +427,7 @@ def main():
     if args.debug:
         logger.setLevel(logging.DEBUG)
 
-    logger.debug("Starting SMOLPP")
+    logger.info("Starting SMOLPP")
 
     use_gpu = args.use_gpu and torch.cuda.is_available()
     if use_gpu:
@@ -488,11 +488,12 @@ def main():
             logger.info("Feature extraction completed for all specified directories.")
 
         elif args.mode == 'train':
-            logger.info(f"Training model with positive and negative examples")
-            model, min_vals, max_vals = train_model(args.positive_dirs, args.negative_dirs)
+            logger.info("Training model with positive and negative examples")
+            model, min_vals, max_vals = train_model(args.positive_dirs, args.negative_dirs, use_gpu=args.use_gpu)
             if args.save_model:
                 save_model(model, model.fc1.in_features, min_vals, max_vals, args.save_model)
             logger.info("Model training completed.")
+
         elif args.mode == 'predict':
             model, min_vals, max_vals = load_model(args.load_model)
             if args.yt_dlp:
@@ -513,16 +514,15 @@ def main():
                 if not args.yt_dlp and not os.path.exists(file):
                     logger.error(f"File not found: {file}")
                     continue
-                similarity = analyze_similarity(model, min_vals, max_vals, file, is_youtube_url=args.yt_dlp)
+                similarity = analyze_similarity(model, min_vals, max_vals, file,
+                                                is_youtube_url=args.yt_dlp, use_gpu=args.use_gpu)
                 logger.info(f"{file} similarity: {similarity * 100:.2f}%")
     except KeyboardInterrupt:
         print("\nInterrupt received, stopping...")
     except Exception as e:
         logger.exception(f"An error occurred: {str(e)}")
     finally:
-        logger.debug("SMOLPP completed")
-
-    logger.debug("SMOLPP completed successfully")
+        logger.info("SMOLPP completed")
 
 
 if __name__ == "__main__":
