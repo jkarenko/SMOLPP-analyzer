@@ -369,8 +369,8 @@ def analyze_similarity(model, min_vals, max_vals, input_file, is_youtube_url=Fal
         return 0.0
 
 
-def analyze_audio_file(model, min_vals, max_vals, audio_file):
-    features = extract_features(audio_file)
+def analyze_audio_file(model, min_vals, max_vals, audio_file, use_gpu=False):
+    features = extract_features(audio_file, use_gpu=use_gpu)
     feature_values = np.array(list(features.values()))
     normalized_features = normalize_features(feature_values, min_vals, max_vals)
     x = torch.tensor(normalized_features, dtype=torch.float32).unsqueeze(0)
