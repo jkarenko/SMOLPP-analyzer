@@ -288,13 +288,13 @@ def load_model(file_path):
 
 def main():
     parser = argparse.ArgumentParser(description="SMOLPP: Audio Similarity Analyzer")
-    parser.add_argument("mode", choices=['train', 'analyze'], help="Mode of operation")
+    parser.add_argument("mode", choices=['train', 'predict'], help="Mode of operation")
     parser.add_argument("--positive_dirs", nargs='+',
                         help="Paths to directories containing positive example audio files (required for train mode)")
     parser.add_argument("--negative_dirs", nargs='+',
                         help="Paths to directories containing negative example audio files (required for train mode)")
     parser.add_argument("--input_file",
-                        help="Path to input audio file(s) (required for analyze mode, supports wildcards)")
+                        help="Path to input audio file(s) (required for predict mode, supports wildcards)")
     parser.add_argument("--debug", action="store_true", help="Enable debug logging")
     parser.add_argument("--save_model", help="Path to save the trained model")
     parser.add_argument("--load_model", help="Path to load a pre-trained model")
@@ -308,12 +308,12 @@ def main():
 
     logger.debug("Starting SMOLPP")
 
-    if args.mode == 'analyze':
+    if args.mode == 'predict':
         if not args.input_file:
-            logger.error("Input file is required for analyze mode.")
+            logger.error("Input file is required for predict mode.")
             sys.exit(1)
         if not args.load_model:
-            logger.error("Pre-trained model is required for analyze mode.")
+            logger.error("Pre-trained model is required for predict mode.")
             sys.exit(1)
 
     if args.mode == 'train':
@@ -340,7 +340,7 @@ def main():
             if args.save_model:
                 save_model(model, model.fc1.in_features, min_vals, max_vals, args.save_model)
             logger.info("Model training completed.")
-        elif args.mode == 'analyze':
+        elif args.mode == 'predict':
             model, min_vals, max_vals = load_model(args.load_model)
             if args.yt_dlp:
                 if not args.input_file.startswith('http'):
