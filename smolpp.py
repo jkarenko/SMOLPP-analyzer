@@ -355,15 +355,15 @@ def train_model(positive_dirs, negative_dirs, n_splits=5, use_gpu=False):
     return final_model, min_vals, max_vals
 
 
-def analyze_similarity(model, min_vals, max_vals, input_file, is_youtube_url=False):
+def analyze_similarity(model, min_vals, max_vals, input_file, is_youtube_url=False, use_gpu=False):
     logger.debug(f"Analyzing similarity for {'YouTube video' if is_youtube_url else 'file'}: {input_file}")
     try:
         if is_youtube_url:
             with youtube_audio(input_file) as audio_file:
                 logger.debug(f"Downloaded YouTube audio to: {audio_file}")
-                return analyze_audio_file(model, min_vals, max_vals, audio_file)
+                return analyze_audio_file(model, min_vals, max_vals, audio_file, use_gpu)
         else:
-            return analyze_audio_file(model, min_vals, max_vals, input_file)
+            return analyze_audio_file(model, min_vals, max_vals, input_file, use_gpu)
     except Exception as e:
         logger.error(f"Error analyzing input: {str(e)}")
         return 0.0
