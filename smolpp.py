@@ -225,7 +225,7 @@ def extract_features_for_directory(directory, use_gpu=False):
     return feature_dict
 
 
-def extract_and_cache_features(directory):
+def extract_and_cache_features(directory, use_gpu=False):
     cache_file = os.path.join(directory, 'features.json')
     if os.path.exists(cache_file):
         try:
@@ -240,10 +240,10 @@ def extract_and_cache_features(directory):
     features = {}
     for file in glob.glob(os.path.join(directory, '*.mp3')):
         try:
-            file_features = extract_features(file)
+            file_features = extract_features(file, use_gpu=use_gpu)
             # Convert numpy types to native Python types
-            features[file] = [float(val) for val in file_features.values()]
-        except ValueError as e:
+            features[file] = {k: float(v) for k, v in file_features.items()}
+        except Exception as e:
             logger.warning(f"Skipping file {file}. {str(e)}")
 
     try:
