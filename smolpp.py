@@ -264,7 +264,14 @@ def train_model(positive_dirs, negative_dirs, n_splits=5, use_gpu=False):
             features.extend(dir_features.values())
             labels.extend([label] * len(dir_features))
 
-    features = np.array(features)
+    # Extract keys from the first feature dictionary
+    feature_keys = list(features[0].keys())
+
+    # Convert features to a list of lists containing only values
+    feature_values = [list(feature.values()) for feature in features]
+
+    # Convert to numpy array
+    features = np.array(feature_values)
     labels = np.array(labels)
 
     # Calculate normalization values
