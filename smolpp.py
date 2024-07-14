@@ -5,6 +5,9 @@ import logging
 import os
 import sys
 import tempfile
+import hashlib
+import signal
+import warnings
 from contextlib import contextmanager
 
 import librosa
@@ -13,13 +16,18 @@ import scipy
 import torch
 import torch.nn as nn
 import torch.optim as optim
+import torchaudio
+import torchaudio.transforms as T
 import yt_dlp
+from concurrent.futures import ProcessPoolExecutor
 from sklearn.metrics import accuracy_score, f1_score, roc_auc_score
 from sklearn.model_selection import KFold
+from tqdm import tqdm
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 scipy.signal.hann = scipy.signal.windows.hann
+warnings.filterwarnings("ignore", message="The MPEG_LAYER_III subtype is unknown to TorchAudio.*")
 
 
 class SimilarityModel(nn.Module):
@@ -30,12 +38,13 @@ class SimilarityModel(nn.Module):
         self.fc3 = nn.Linear(32, 16)
         self.fc4 = nn.Linear(16, 1)
         self.relu = nn.ReLU()
+        self.dropout = nn.Dropout(0.2)
         self.sigmoid = nn.Sigmoid()
 
     def forward(self, x):
-        x = self.relu(self.fc1(x))
-        x = self.relu(self.fc2(x))
-        x = self.relu(self.fc3(x))
+        x = self.dropout(self.relu(self.fc1(x)))
+        x = self.dropout(self.relu(self.fc2(x)))
+        x = self.dropout(self.relu(self.fc3(x)))
         x = self.sigmoid(self.fc4(x))
         return x
 
@@ -56,48 +65,97 @@ def youtube_audio(url):
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=True)
             filename = ydl.prepare_filename(info)
-            audio_path = os.path.splitext(filename)[0] + '.mp3'
+            audio_path = f'{os.path.splitext(filename)[0]}.mp3'
             if os.path.exists(audio_path):
                 yield audio_path
             else:
                 raise FileNotFoundError(f"Downloaded audio file not found: {audio_path}")
 
 
-def extract_features(audio_file, offset=0, duration=None):
-    logger.info(f"Extracting features from {audio_file}")
-    try:
-        y, sr = librosa.load(audio_file, offset=offset, duration=duration)
+def extract_features(audio_file, use_gpu=False, chunk_duration=10):
+    device = torch.device('cuda' if use_gpu and torch.cuda.is_available() else 'cpu')
 
-        features = {'tempo': librosa.feature.tempo(y=y, sr=sr)[0],
-                    'zero_crossing_rate': np.mean(librosa.feature.zero_crossing_rate(y)),
-                    'spectral_centroid': np.mean(librosa.feature.spectral_centroid(y=y, sr=sr)),
-                    'spectral_rolloff': np.mean(librosa.feature.spectral_rolloff(y=y, sr=sr))}
+    # Load audio metadata
+    metadata = torchaudio.info(audio_file)
+    sample_rate = metadata.sample_rate
+    num_frames = metadata.num_frames
+    duration = num_frames / sample_rate
 
-        # Mel-frequency cepstral coefficients
-        mfcc = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=13)
-        for i, coef in enumerate(mfcc):
-            features[f'mfcc_{i}'] = np.mean(coef)
+    # Set up spectrogram parameters
+    n_fft = 2048
+    win_length = None
+    hop_length = 512
+    n_mels = 128
+    n_mfcc = 13
 
-        # Chroma features
-        chroma = librosa.feature.chroma_stft(y=y, sr=sr)
-        features['chroma_mean'] = np.mean(chroma)
-        features['chroma_std'] = np.std(chroma)
+    # Initialize transforms
+    spectrogram = T.Spectrogram(n_fft=n_fft, win_length=win_length, hop_length=hop_length).to(device)
+    mel_spectrogram = T.MelSpectrogram(sample_rate=sample_rate, n_fft=n_fft, n_mels=n_mels, hop_length=hop_length).to(
+        device)
+    mfcc_transform = T.MFCC(sample_rate=sample_rate, n_mfcc=n_mfcc,
+                            melkwargs={'n_fft': n_fft, 'n_mels': n_mels, 'hop_length': hop_length}).to(device)
+    spectral_centroid = T.SpectralCentroid(sample_rate=sample_rate, n_fft=n_fft, hop_length=hop_length).to(device)
 
-        # Spectral contrast
-        contrast = librosa.feature.spectral_contrast(y=y, sr=sr)
-        features['spectral_contrast_mean'] = np.mean(contrast)
-        features['spectral_contrast_std'] = np.std(contrast)
+    # Initialize feature accumulators
+    features = {
+        'spectrogram_mean': 0,
+        'spectrogram_std': 0,
+        'melspectrogram_mean': 0,
+        'melspectrogram_std': 0,
+        'spectral_centroid_mean': 0,
+        'spectral_centroid_std': 0,
+    }
+    for i in range(n_mfcc):
+        features[f'mfcc_{i}_mean'] = 0
+        features[f'mfcc_{i}_std'] = 0
 
-        # Tonnetz (tonal centroid features)
-        tonnetz = librosa.feature.tonnetz(y=librosa.effects.harmonic(y), sr=sr)
-        features['tonnetz_mean'] = np.mean(tonnetz)
-        features['tonnetz_std'] = np.std(tonnetz)
+    # Process audio in chunks
+    chunk_size = int(chunk_duration * sample_rate)
+    num_chunks = int(np.ceil(num_frames / chunk_size))
 
-        logger.debug(f"Extracted features: {features}")
-        return features
-    except Exception as e:
-        logger.error(f"Error extracting features from {audio_file}: {str(e)}")
-        raise ValueError(f"Error extracting features from {audio_file}: {str(e)}")
+    for i in tqdm(range(num_chunks), desc=f"Processing {os.path.basename(audio_file)}"):
+        start_frame = i * chunk_size
+        end_frame = min((i + 1) * chunk_size, num_frames)
+
+        waveform, _ = torchaudio.load(audio_file, frame_offset=start_frame, num_frames=end_frame - start_frame)
+        waveform = waveform.to(device)
+
+        # Skip processing if the chunk is silent
+        if torch.allclose(waveform, torch.zeros_like(waveform)):
+            logger.debug(f"Skipping silent chunk {i}")
+            continue
+
+        # Extract features for this chunk
+        spec = spectrogram(waveform)
+        mel_spec = mel_spectrogram(waveform)
+        mfcc = mfcc_transform(waveform)
+
+        # Spectral centroid calculation with improved error handling
+        try:
+            centroid = spectral_centroid(waveform)
+            # Replace NaN and Inf values with zeros
+            centroid = torch.nan_to_num(centroid, nan=0.0, posinf=0.0, neginf=0.0)
+        except Exception as e:
+            logger.error(f"Error calculating spectral centroid for chunk {i}: {str(e)}")
+            centroid = torch.zeros_like(waveform)
+
+        # Update accumulators
+        features['spectrogram_mean'] += spec.mean().item()
+        features['spectrogram_std'] += spec.std().item()
+        features['melspectrogram_mean'] += mel_spec.mean().item()
+        features['melspectrogram_std'] += mel_spec.std().item()
+        features['spectral_centroid_mean'] += centroid.mean().item()
+        features['spectral_centroid_std'] += centroid.std().item()
+
+        for j in range(n_mfcc):
+            features[f'mfcc_{j}_mean'] += mfcc[0, j].mean().item()
+            features[f'mfcc_{j}_std'] += mfcc[0, j].std().item()
+
+    # Compute final average
+    for key in features:
+        features[key] /= num_chunks
+
+    return features
 
 
 def calculate_metrics(y_true, y_pred_proba):
@@ -112,12 +170,59 @@ def normalize_features(features, min_vals, max_vals):
     return (features - min_vals) / (max_vals - min_vals + 1e-8)  # Add small epsilon to avoid division by zero
 
 
-def extract_features_for_directory(directory):
-    features = extract_and_cache_features(directory)
-    cache_file = os.path.join(directory, 'features.json')
+def cached_extract_features(audio_file, use_gpu=False, chunk_duration=10):
+    # Create a unique identifier for this file and extraction parameters
+    file_hash = hashlib.md5(open(audio_file, 'rb').read()).hexdigest()
+    cache_key = f"{file_hash}_{use_gpu}_{chunk_duration}"
+    cache_dir = os.path.join(os.path.dirname(audio_file), '.feature_cache')
+    cache_file = os.path.join(cache_dir, f"{cache_key}.json")
+
+    # Check if cached features exist
+    if os.path.exists(cache_file):
+        with open(cache_file, 'r') as f:
+            return json.load(f)
+
+    # Extract features
+    features = extract_features(audio_file, use_gpu, chunk_duration)
+
+    # Cache the results
+    os.makedirs(cache_dir, exist_ok=True)
     with open(cache_file, 'w') as f:
-        json.dump(features, f, indent=2)
-    logger.info(f"Features extracted and saved to {cache_file}")
+        json.dump(features, f)
+
+    return features
+
+
+def extract_file_features(file, use_gpu):
+    return extract_features(file, use_gpu=use_gpu)
+
+
+def extract_features_for_directory(directory, use_gpu=False):
+    cache_file = os.path.join(directory, 'features.json')
+    if os.path.exists(cache_file):
+        try:
+            with open(cache_file, 'r') as f:
+                return json.load(f)
+        except json.JSONDecodeError:
+            logger.warning(f"Corrupted cache file found in {directory}. Regenerating features.")
+            os.remove(cache_file)
+        except Exception as e:
+            logger.warning(f"Error reading cache file in {directory}: {str(e)}. Regenerating features.")
+
+    files = glob.glob(os.path.join(directory, '*.mp3'))
+
+    with ProcessPoolExecutor() as executor:
+        features = list(executor.map(extract_file_features, files, [use_gpu] * len(files)))
+
+    feature_dict = dict(zip(files, features))
+
+    try:
+        with open(cache_file, 'w') as f:
+            json.dump(feature_dict, f, indent=2)
+    except Exception as e:
+        logger.warning(f"Failed to write cache file in {directory}: {str(e)}")
+
+    return feature_dict
 
 
 def extract_and_cache_features(directory):
@@ -250,22 +355,22 @@ def train_model(positive_dirs, negative_dirs, n_splits=5):
     return final_model, min_vals, max_vals
 
 
-def analyze_similarity(model, min_vals, max_vals, input_file, offset=0, duration=None, is_youtube_url=False):
+def analyze_similarity(model, min_vals, max_vals, input_file, is_youtube_url=False):
     logger.debug(f"Analyzing similarity for {'YouTube video' if is_youtube_url else 'file'}: {input_file}")
     try:
         if is_youtube_url:
             with youtube_audio(input_file) as audio_file:
                 logger.debug(f"Downloaded YouTube audio to: {audio_file}")
-                return analyze_audio_file(model, min_vals, max_vals, audio_file, offset, duration)
+                return analyze_audio_file(model, min_vals, max_vals, audio_file)
         else:
-            return analyze_audio_file(model, min_vals, max_vals, input_file, offset, duration)
+            return analyze_audio_file(model, min_vals, max_vals, input_file)
     except Exception as e:
         logger.error(f"Error analyzing input: {str(e)}")
         return 0.0
 
 
-def analyze_audio_file(model, min_vals, max_vals, audio_file, offset=0, duration=None):
-    features = extract_features(audio_file, offset=offset, duration=duration)
+def analyze_audio_file(model, min_vals, max_vals, audio_file):
+    features = extract_features(audio_file)
     feature_values = np.array(list(features.values()))
     normalized_features = normalize_features(feature_values, min_vals, max_vals)
     x = torch.tensor(normalized_features, dtype=torch.float32).unsqueeze(0)
@@ -294,7 +399,14 @@ def load_model(file_path):
     return model, model_info['min_vals'], model_info['max_vals']
 
 
+def signal_handler(signum, frame):
+    print("\nInterrupt received, stopping...")
+    sys.exit(0)
+
+
 def main():
+    signal.signal(signal.SIGINT, signal_handler)
+
     parser = argparse.ArgumentParser(description="SMOLPP: Audio Similarity Analyzer")
     parser.add_argument("mode", choices=['train', 'predict', 'extract'], help="Mode of operation")
     parser.add_argument("--dirs", nargs='+',
@@ -308,15 +420,21 @@ def main():
     parser.add_argument("--debug", action="store_true", help="Enable debug logging")
     parser.add_argument("--save_model", help="Path to save the trained model")
     parser.add_argument("--load_model", help="Path to load a pre-trained model")
-    parser.add_argument("--offset", type=float, default=0, help="Start reading audio from this time (in seconds)")
-    parser.add_argument("--duration", type=float, default=None, help="Only load up to this much audio (in seconds)")
     parser.add_argument("--yt-dlp", action="store_true", help="Treat input as URL and download audio using yt-dlp")
+    parser.add_argument("--use_gpu", action="store_true", help="Use GPU acceleration for feature extraction")
     args = parser.parse_args()
 
     if args.debug:
         logger.setLevel(logging.DEBUG)
 
     logger.debug("Starting SMOLPP")
+
+    use_gpu = args.use_gpu and torch.cuda.is_available()
+    if use_gpu:
+        torch.cuda.init()
+        logger.info("GPU acceleration enabled")
+    else:
+        logger.warning("GPU acceleration not available or not enabled")
 
     if args.mode == 'extract':
         if not args.dirs:
@@ -326,7 +444,7 @@ def main():
             if not os.path.isdir(directory):
                 logger.error(f"Directory does not exist: {directory}")
                 sys.exit(1)
-            extract_features_for_directory(directory)
+            extract_features_for_directory(directory, use_gpu=use_gpu)
         logger.info("Feature extraction completed for all specified directories.")
         sys.exit(0)
 
@@ -356,7 +474,20 @@ def main():
             f"Found {len(positive_files)} positive examples and {len(negative_files)} negative examples for training")
 
     try:
-        if args.mode == 'train':
+        if args.mode == 'extract':
+            for directory in args.dirs:
+                if not os.path.isdir(directory):
+                    logger.error(f"Directory does not exist: {directory}")
+                    continue
+                files = glob.glob(os.path.join(directory, '*.mp3'))
+                for file in tqdm(files, desc=f"Extracting features from {directory}"):
+                    try:
+                        extract_file_features(file, args.use_gpu)
+                    except Exception as e:
+                        logger.error(f"Error processing {file}: {str(e)}")
+            logger.info("Feature extraction completed for all specified directories.")
+
+        elif args.mode == 'train':
             logger.info(f"Training model with positive and negative examples")
             model, min_vals, max_vals = train_model(args.positive_dirs, args.negative_dirs)
             if args.save_model:
@@ -382,13 +513,14 @@ def main():
                 if not args.yt_dlp and not os.path.exists(file):
                     logger.error(f"File not found: {file}")
                     continue
-                similarity = analyze_similarity(model, min_vals, max_vals, file, offset=args.offset,
-                                                duration=args.duration, is_youtube_url=args.yt_dlp)
-                # logger.info(f"{'YouTube video' if args.yt_dlp else 'File'}: {file}")
+                similarity = analyze_similarity(model, min_vals, max_vals, file, is_youtube_url=args.yt_dlp)
                 logger.info(f"{file} similarity: {similarity * 100:.2f}%")
+    except KeyboardInterrupt:
+        print("\nInterrupt received, stopping...")
     except Exception as e:
         logger.exception(f"An error occurred: {str(e)}")
-        sys.exit(1)
+    finally:
+        logger.debug("SMOLPP completed")
 
     logger.debug("SMOLPP completed successfully")
 

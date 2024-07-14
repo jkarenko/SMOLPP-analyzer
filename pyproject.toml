@@ -8,14 +8,21 @@ readme = "README.md"
 [tool.poetry.dependencies]
 python = "^3.11"
 librosa = "*"
-torch = "*"
 pandas = "*"
 numpy = "^1.26.4"
 seaborn = "*"
 behave = "*"
 yt-dlp = "*"
+torch = { version = "*", source = "cu121" }
+torchaudio = { version = "*", source = "cu121" }
+tdqm = "^0.0.1"
 
 
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
+
+[[tool.poetry.source]]
+name = "cu121"
+url = "https://download.pytorch.org/whl/cu121"
+priority = "explicit"
