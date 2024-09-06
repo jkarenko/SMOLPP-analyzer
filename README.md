@@ -2,6 +2,8 @@
 
 SMOLPP is a Python CLI tool that analyzes audio similarity using machine learning.
 
+![SMOLPP.png](doc/SMOLPP.png)
+
 ## Features
 
 - Train models on positive and negative audio examples
@@ -29,10 +31,16 @@ poetry install
 poetry run python smolpp.py train --positive_dirs /path/to/positive/samples --negative_dirs /path/to/negative/samples --save_model model.pth
 ```
 
-### Analyze audio:
+### Predict genre of audio:
 
 ```
-poetry run python smolpp.py analyze --input_file /path/to/audio.mp3 --load_model model.pth
+poetry run python smolpp.py predict --input_file /path/to/audio.mp3 --load_model model.pth
+```
+
+### Extract features from audio in directories:
+
+```
+poetry run python smolpp.py extract --dirs /dir1 /dir2
 ```
 
 ## Testing
